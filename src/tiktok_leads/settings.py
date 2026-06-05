@@ -20,11 +20,15 @@ class Settings(BaseSettings):
     tiktok_browser_headless: bool = True
     tiktok_browser: str = "chromium"
     tiktok_starting_url: str = "https://www.tiktok.com"
+    tiktok_session_timeout_ms: int = 90_000
+    tiktok_session_retries: int = 2
     tiktok_request_delay_seconds: float = 2.0
     tiktok_request_jitter_seconds: float = 1.5
     tiktok_max_consecutive_blocked_profiles: int = 5
-    tiktok_block_cooldown_seconds: float = 120.0
+    tiktok_block_cooldown_seconds: float = 10.0
     tiktok_max_block_cooldowns_per_hashtag: int = 1
+    tiktok_restart_session_on_block: bool = True
+    tiktok_restart_session_between_hashtags: bool = True
     tiktok_suppress_library_errors: bool = True
     proxy_server: str | None = None
     proxy_username: str | None = None

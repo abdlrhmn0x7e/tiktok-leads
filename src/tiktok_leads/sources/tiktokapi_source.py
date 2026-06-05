@@ -34,11 +34,15 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         headless: bool,
         browser: str,
         starting_url: str,
+        session_timeout_ms: int,
+        session_retries: int,
         request_delay_seconds: float,
         request_jitter_seconds: float,
         max_consecutive_blocked_profiles: int,
         block_cooldown_seconds: float,
         max_block_cooldowns_per_hashtag: int,
+        restart_session_on_block: bool,
+        restart_session_between_hashtags: bool,
         proxy: dict[str, str] | None,
     ) -> None:
         self.ms_token = ms_token
@@ -46,34 +50,56 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         self.headless = headless
         self.browser = browser
         self.starting_url = starting_url
+        self.session_timeout_ms = session_timeout_ms
+        self.session_retries = session_retries
         self.request_delay_seconds = request_delay_seconds
         self.request_jitter_seconds = request_jitter_seconds
         self.max_consecutive_blocked_profiles = max_consecutive_blocked_profiles
         self.block_cooldown_seconds = block_cooldown_seconds
         self.max_block_cooldowns_per_hashtag = max_block_cooldowns_per_hashtag
+        self.restart_session_on_block = restart_session_on_block
+        self.restart_session_between_hashtags = restart_session_between_hashtags
         self.proxy = proxy
         self.api: TikTokApi | None = None
 
     async def __aenter__(self) -> "TikTokApiSource":
-        self.api = TikTokApi()
-        logger.info(
-            "starting TikTokApi session browser=%s headless=%s ms_token=%s",
-            self.browser,
-            self.headless,
-            "configured" if self.ms_token else "not configured",
-        )
-        if self.proxy:
-            logger.info("using proxy server=%s", self.proxy.get("server"))
-        await self.api.create_sessions(
-            ms_tokens=[self.ms_token] if self.ms_token else None,
-            num_sessions=1,
-            proxies=[self.proxy] if self.proxy else None,
-            sleep_after=3,
-            browser=self.browser,
-            headless=self.headless,
-            starting_url=self.starting_url,
-        )
+        await self._start_session()
         return self
+
+    async def _start_session(self) -> None:
+        last_error: BaseException | None = None
+        for attempt in range(1, self.session_retries + 2):
+            self.api = TikTokApi()
+            logger.info(
+                "starting TikTokApi session attempt=%s browser=%s headless=%s timeout_ms=%s ms_token=%s",
+                attempt,
+                self.browser,
+                self.headless,
+                self.session_timeout_ms,
+                "configured" if self.ms_token else "not configured",
+            )
+            if self.proxy:
+                logger.info("using proxy server=%s", self.proxy.get("server"))
+            try:
+                await self.api.create_sessions(
+                    ms_tokens=[self.ms_token] if self.ms_token else None,
+                    num_sessions=1,
+                    proxies=[self.proxy] if self.proxy else None,
+                    sleep_after=3,
+                    browser=self.browser,
+                    headless=self.headless,
+                    starting_url=self.starting_url,
+                    timeout=self.session_timeout_ms,
+                )
+                return
+            except Exception as error:
+                last_error = error
+                logger.warning("failed to create TikTokApi session attempt=%s: %s", attempt, error)
+                await self._close_session()
+                if attempt <= self.session_retries:
+                    await asyncio.sleep(self.block_cooldown_seconds)
+        assert last_error is not None
+        raise last_error
 
     async def __aexit__(
         self,
@@ -81,8 +107,25 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        await self._close_session()
+
+    async def _close_session(self) -> None:
         if self.api is not None:
-            await self.api.close_sessions()
+            try:
+                await self.api.close_sessions()
+                stop_playwright = getattr(self.api, "stop_playwright", None)
+                if stop_playwright is not None:
+                    await stop_playwright()
+            except Exception:
+                logger.exception("failed to close TikTokApi session cleanly")
+            self.api = None
+
+    async def _restart_session(self) -> None:
+        logger.info("restarting TikTokApi Playwright session")
+        await self._close_session()
+        if self.block_cooldown_seconds > 0:
+            await asyncio.sleep(self.block_cooldown_seconds)
+        await self._start_session()
 
     async def profiles_from_handles(
         self,
@@ -90,10 +133,10 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         *,
         niche: str,
     ) -> AsyncIterable[CandidateProfile]:
-        api = self._api()
         consecutive_blocked = 0
         cooldowns = 0
         for handle in handles:
+            api = self._api()
             username = handle.removeprefix("@").strip()
             if not username:
                 continue
@@ -107,7 +150,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                 yield profile
             else:
                 consecutive_blocked += 1
-                if await self._cooldown_if_blocked(consecutive_blocked, context="handle scan"):
+                if await self._recover_if_blocked(consecutive_blocked, context="handle scan"):
                     consecutive_blocked = 0
                     cooldowns += 1
                     if cooldowns > self.max_block_cooldowns_per_hashtag:
@@ -145,15 +188,19 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     yield profile
                 else:
                     consecutive_blocked += 1
-                    if await self._cooldown_if_blocked(consecutive_blocked, context=f"#{tag}"):
-                        consecutive_blocked = 0
+                    if await self._recover_if_blocked(consecutive_blocked, context=f"#{tag}"):
                         cooldowns += 1
-                        if cooldowns > self.max_block_cooldowns_per_hashtag:
-                            logger.warning("stopping #%s after repeated TikTok blocking", tag)
-                            return
+                        logger.warning(
+                            "stopping #%s after TikTok blocking; next hashtag will use a fresh session",
+                            tag,
+                        )
+                        return
                 await self._delay()
         except Exception:
             logger.exception("failed to crawl hashtag #%s", tag)
+        finally:
+            if self.restart_session_between_hashtags:
+                await self._restart_session()
 
     async def _safe_profile_from_user(
         self,
@@ -216,17 +263,25 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         if delay > 0:
             await asyncio.sleep(delay)
 
-    async def _cooldown_if_blocked(self, consecutive_blocked: int, *, context: str) -> bool:
+    async def _recover_if_blocked(self, consecutive_blocked: int, *, context: str) -> bool:
         if consecutive_blocked < self.max_consecutive_blocked_profiles:
             return False
-        logger.warning(
-            "hit %s consecutive blocked/empty profiles during %s; cooling down for %.0f seconds",
-            consecutive_blocked,
-            context,
-            self.block_cooldown_seconds,
-        )
-        if self.block_cooldown_seconds > 0:
-            await asyncio.sleep(self.block_cooldown_seconds)
+        if self.restart_session_on_block:
+            logger.warning(
+                "hit %s consecutive blocked/empty profiles during %s; restarting session",
+                consecutive_blocked,
+                context,
+            )
+            await self._restart_session()
+        else:
+            logger.warning(
+                "hit %s consecutive blocked/empty profiles during %s; cooling down for %.0f seconds",
+                consecutive_blocked,
+                context,
+                self.block_cooldown_seconds,
+            )
+            if self.block_cooldown_seconds > 0:
+                await asyncio.sleep(self.block_cooldown_seconds)
         return True
 
     def _api(self) -> TikTokApi:
