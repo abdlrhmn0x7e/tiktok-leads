@@ -6,6 +6,7 @@ import logging
 import random
 
 from tiktok_leads.db import LeadRepository
+from tiktok_leads.models import Lead
 from tiktok_leads.niches import hashtags_for_niche
 from tiktok_leads.notifiers import build_notifier
 from tiktok_leads.runner import scrape_handles, scrape_hashtag
@@ -24,6 +25,7 @@ async def async_main() -> None:
     parser.add_argument("--hashtag", action="append", default=[], help="TikTok hashtag to crawl")
     parser.add_argument("--limit", type=int, default=30, help="Maximum hashtag videos to inspect")
     parser.add_argument("--init-db", action="store_true", help="Only initialize the SQLite schema")
+    parser.add_argument("--test-notification", action="store_true", help="Send a fake lead notification and exit")
     parser.add_argument("--log-level", default="INFO", help="Logging level: DEBUG, INFO, WARNING, ERROR")
     args = parser.parse_args()
     configure_logging(args.log_level)
@@ -31,6 +33,23 @@ async def async_main() -> None:
     settings = Settings()
     if settings.tiktok_suppress_library_errors:
         logging.getLogger("TikTokApi.tiktok").setLevel(logging.CRITICAL)
+
+    if args.test_notification:
+        notifier = build_notifier(settings)
+        notifier.send(
+            Lead(
+                handle="test_creator_name",
+                profile_url="https://www.tiktok.com/@test_creator_name",
+                niche=args.niche,
+                email="test@example.com",
+                followers_count=125_000,
+                average_views=35_000,
+                source="test",
+            )
+        )
+        print("Sent test notification.")
+        return
+
     repository = LeadRepository(settings.database_path)
     repository.initialize()
 

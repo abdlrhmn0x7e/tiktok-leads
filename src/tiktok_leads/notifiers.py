@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from urllib.parse import quote
-
 import requests
 
 from tiktok_leads.models import Lead
@@ -28,6 +26,8 @@ class DiscordNotifier(Notifier):
             json=format_discord_payload(lead),
             timeout=20,
         )
+        if not response.ok:
+            raise RuntimeError(f"Discord webhook failed: {response.status_code} {response.text}")
         response.raise_for_status()
 
 
@@ -82,36 +82,26 @@ def format_discord_payload(lead: Lead) -> dict:
     return {
         "content": "\n".join(
             [
-                "New TikTok influencer found",
+                "**New TikTok influencer found**",
                 "",
-                "handle",
+                f"Niche: `{lead.niche}`",
+                f"Followers: `{lead.followers_count:,}`",
+                "",
+                "Handle",
                 "```text",
                 format_handle(lead.handle),
                 "```",
-                "average views",
+                "Average views",
                 "```text",
                 f"{lead.average_views:,}",
                 "```",
-                "email",
+                "Email",
                 "```text",
                 lead.email,
                 "```",
+                f"Profile: {lead.profile_url}",
             ]
         ),
-        "embeds": [
-            {
-                "title": format_handle(lead.handle),
-                "url": lead.profile_url,
-                "fields": [
-                    {"name": "Handle", "value": f"`{format_handle(lead.handle)}`", "inline": True},
-                    {"name": "Niche", "value": f"`{lead.niche}`", "inline": True},
-                    {"name": "Email", "value": f"`{lead.email}`", "inline": False},
-                    {"name": "Followers", "value": f"`{lead.followers_count:,}`", "inline": True},
-                    {"name": "Average views", "value": f"`{lead.average_views:,}`", "inline": True},
-                    {"name": "Profile", "value": f"`{lead.profile_url}`", "inline": False},
-                ],
-            }
-        ],
         "components": [
             {
                 "type": 1,
@@ -121,13 +111,7 @@ def format_discord_payload(lead: Lead) -> dict:
                         "style": 5,
                         "label": "Open TikTok",
                         "url": lead.profile_url,
-                    },
-                    {
-                        "type": 2,
-                        "style": 5,
-                        "label": "Email",
-                        "url": f"mailto:{quote(lead.email)}",
-                    },
+                    }
                 ],
             }
         ],

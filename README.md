@@ -55,6 +55,12 @@ Initialize the database:
 uv run tiktok-leads --niche fitness --init-db
 ```
 
+Send a test notification:
+
+```bash
+uv run tiktok-leads --niche fitness --test-notification
+```
+
 Inspect known profiles:
 
 ```bash

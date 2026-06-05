@@ -105,8 +105,12 @@ async def _process_candidates(
         if repository.insert_lead(lead):
             logger.info("inserted @%s email=%s", lead.handle, lead.email)
             logger.info("sending notification for @%s", lead.handle)
-            notifier.send(lead)
-            repository.mark_notified(lead.email)
-            logger.info("notification marked sent for @%s", lead.handle)
+            try:
+                notifier.send(lead)
+            except Exception:
+                logger.exception("failed to send notification for @%s", lead.handle)
+            else:
+                repository.mark_notified(lead.email)
+                logger.info("notification marked sent for @%s", lead.handle)
             inserted += 1
     return inserted
