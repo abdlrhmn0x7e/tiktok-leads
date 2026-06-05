@@ -1,0 +1,22 @@
+[project]
+name = "tiktok-leads"
+version = "0.1.0"
+description = "Local TikTok lead scraper for niche influencer discovery"
+readme = "README.md"
+authors = [
+    { name = "abdlhrmn0x7e", email = "abdalrahman@firstimpactmed.com" }
+]
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "pydantic-settings>=2.14.1",
+    "python-dotenv>=1.2.2",
+    "requests>=2.34.2",
+    "tiktokapi>=7.3.3",
+]
+
+[project.scripts]
+tiktok-leads = "tiktok_leads.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.17,<0.12.0"]
+build-backend = "uv_build"
