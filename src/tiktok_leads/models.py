@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from tiktok_leads.numbers import robust_average_view_count
+
 
 @dataclass(frozen=True)
 class CandidateProfile:
@@ -17,9 +19,7 @@ class CandidateProfile:
 
     @property
     def average_views(self) -> int | None:
-        if not self.recent_video_views:
-            return None
-        return round(sum(self.recent_video_views) / len(self.recent_video_views))
+        return robust_average_view_count(self.recent_video_views)
 
 
 @dataclass(frozen=True)
