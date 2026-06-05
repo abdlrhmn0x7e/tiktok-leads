@@ -164,9 +164,11 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         *,
         niche: str,
         limit: int,
+        exclude_handles: set[str] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         api = self._api()
         tag = hashtag.removeprefix("#").strip()
+        excluded = {handle.removeprefix("@").lower() for handle in exclude_handles or set()}
         seen_handles: set[str] = set()
         consecutive_blocked = 0
         cooldowns = 0
@@ -174,9 +176,13 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             async for video in api.hashtag(name=tag).videos(count=limit):
                 author = self._get(video.as_dict, "author", default={})
                 handle = str(self._get(author, "uniqueId", "unique_id", "nickname", default="")).strip()
-                if not handle or handle in seen_handles:
+                normalized_handle = handle.removeprefix("@").lower()
+                if not handle or normalized_handle in seen_handles:
                     continue
-                seen_handles.add(handle)
+                if normalized_handle in excluded:
+                    logger.info("skipping @%s from #%s: handle already evaluated", handle, tag)
+                    continue
+                seen_handles.add(normalized_handle)
                 profile = await self._safe_profile_from_user(
                     api.user(username=handle),
                     niche=niche,

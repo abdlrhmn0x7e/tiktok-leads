@@ -23,5 +23,6 @@ class TikTokSource(ABC):
         *,
         niche: str,
         limit: int,
+        exclude_handles: set[str] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         raise NotImplementedError

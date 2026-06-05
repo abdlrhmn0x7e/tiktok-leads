@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import random
 
 from tiktok_leads.db import LeadRepository
 from tiktok_leads.niches import hashtags_for_niche
@@ -39,6 +40,8 @@ async def async_main() -> None:
         return
 
     hashtags = args.hashtag or list(hashtags_for_niche(args.niche))
+    if settings.shuffle_hashtags and not args.hashtag:
+        random.shuffle(hashtags)
     if not args.handle and not hashtags:
         parser.error("provide at least one --handle or --hashtag, or use a configured niche")
     if args.hashtag:
@@ -77,6 +80,11 @@ async def async_main() -> None:
                     min_average_views=settings.min_average_views,
                 )
             for hashtag in hashtags:
+                exclude_handles = repository.seen_handles()
+                logging.info(
+                    "excluding %s previously evaluated handle(s)",
+                    len(exclude_handles),
+                )
                 inserted += await scrape_hashtag(
                     source,
                     repository,
@@ -86,6 +94,7 @@ async def async_main() -> None:
                     limit=args.limit,
                     min_followers=settings.min_followers,
                     min_average_views=settings.min_average_views,
+                    exclude_handles=exclude_handles,
                 )
     finally:
         repository.close()

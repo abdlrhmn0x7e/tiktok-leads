@@ -44,10 +44,16 @@ async def scrape_hashtag(
     limit: int,
     min_followers: int,
     min_average_views: int,
+    exclude_handles: set[str] | None = None,
 ) -> int:
     logger.info("crawling hashtag #%s for niche=%s limit=%s", hashtag.removeprefix("#"), niche, limit)
     return await _process_candidates(
-        source.profiles_from_hashtag(hashtag, niche=niche, limit=limit),
+        source.profiles_from_hashtag(
+            hashtag,
+            niche=niche,
+            limit=limit,
+            exclude_handles=exclude_handles,
+        ),
         repository,
         notifier,
         min_followers=min_followers,
@@ -75,6 +81,11 @@ async def _process_candidates(
             candidate.followers_count if candidate.followers_count is not None else "unknown",
             display_average_views,
             candidate.source,
+        )
+        repository.record_scraped_profile(
+            handle=candidate.handle,
+            niche=candidate.niche,
+            source=candidate.source,
         )
 
         evaluation = evaluate_candidate(

@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     tiktok_restart_session_on_block: bool = True
     tiktok_restart_session_between_hashtags: bool = True
     tiktok_suppress_library_errors: bool = True
+    shuffle_hashtags: bool = True
     proxy_server: str | None = None
     proxy_username: str | None = None
     proxy_password: str | None = None
