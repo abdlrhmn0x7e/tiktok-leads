@@ -5,13 +5,16 @@ import asyncio
 import logging
 import random
 
+import requests
+
+from tiktok_leads.daemon import run_daemon
 from tiktok_leads.db import LeadRepository
+from tiktok_leads.factory import build_proxy, build_source
 from tiktok_leads.models import Lead
 from tiktok_leads.niches import hashtags_for_niche
 from tiktok_leads.notifiers import build_notifier
 from tiktok_leads.runner import scrape_handles, scrape_hashtag
 from tiktok_leads.settings import Settings
-from tiktok_leads.sources import TikTokApiSource
 
 
 def main() -> None:
@@ -25,7 +28,14 @@ async def async_main() -> None:
     parser.add_argument("--hashtag", action="append", default=[], help="TikTok hashtag to crawl")
     parser.add_argument("--limit", type=int, default=30, help="Maximum hashtag videos to inspect")
     parser.add_argument("--init-db", action="store_true", help="Only initialize the SQLite schema")
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Run forever: scrape a slice of hashtags each cycle and survive blocks. "
+        "Accepts comma-separated niches, e.g. --niche fitness,mom",
+    )
     parser.add_argument("--test-notification", action="store_true", help="Send a fake lead notification and exit")
+    parser.add_argument("--test-proxy", action="store_true", help="Test configured proxy connectivity and exit")
     parser.add_argument("--log-level", default="INFO", help="Logging level: DEBUG, INFO, WARNING, ERROR")
     args = parser.parse_args()
     configure_logging(args.log_level)
@@ -33,6 +43,10 @@ async def async_main() -> None:
     settings = Settings()
     if settings.tiktok_suppress_library_errors:
         logging.getLogger("TikTokApi.tiktok").setLevel(logging.CRITICAL)
+
+    if args.test_proxy:
+        test_proxy(settings)
+        return
 
     if args.test_notification:
         notifier = build_notifier(settings)
@@ -58,6 +72,15 @@ async def async_main() -> None:
         repository.close()
         return
 
+    if args.daemon:
+        niches = [n.strip() for n in args.niche.split(",") if n.strip()]
+        notifier = build_notifier(settings)
+        try:
+            await run_daemon(settings, repository, notifier, niches=niches, limit=args.limit)
+        finally:
+            repository.close()
+        return
+
     hashtags = args.hashtag or list(hashtags_for_niche(args.niche))
     if settings.shuffle_hashtags and not args.hashtag:
         random.shuffle(hashtags)
@@ -71,23 +94,7 @@ async def async_main() -> None:
     notifier = build_notifier(settings)
     inserted = 0
     try:
-        async with TikTokApiSource(
-            ms_token=settings.tiktok_ms_token,
-            recent_video_count=settings.recent_video_count,
-            headless=settings.tiktok_browser_headless,
-            browser=settings.tiktok_browser,
-            starting_url=settings.tiktok_starting_url,
-            session_timeout_ms=settings.tiktok_session_timeout_ms,
-            session_retries=settings.tiktok_session_retries,
-            request_delay_seconds=settings.tiktok_request_delay_seconds,
-            request_jitter_seconds=settings.tiktok_request_jitter_seconds,
-            max_consecutive_blocked_profiles=settings.tiktok_max_consecutive_blocked_profiles,
-            block_cooldown_seconds=settings.tiktok_block_cooldown_seconds,
-            max_block_cooldowns_per_hashtag=settings.tiktok_max_block_cooldowns_per_hashtag,
-            restart_session_on_block=settings.tiktok_restart_session_on_block,
-            restart_session_between_hashtags=settings.tiktok_restart_session_between_hashtags,
-            proxy=build_proxy(settings),
-        ) as source:
+        async with build_source(settings) as source:
             if args.handle:
                 inserted += await scrape_handles(
                     source,
@@ -130,12 +137,34 @@ def configure_logging(log_level: str) -> None:
     )
 
 
-def build_proxy(settings: Settings) -> dict[str, str] | None:
-    if not settings.proxy_server:
-        return None
-    proxy = {"server": settings.proxy_server}
-    if settings.proxy_username:
-        proxy["username"] = settings.proxy_username
-    if settings.proxy_password:
-        proxy["password"] = settings.proxy_password
-    return proxy
+def test_proxy(settings: Settings) -> None:
+    proxy = build_proxy(settings)
+    if proxy is None:
+        raise SystemExit("PROXY_SERVER is not configured.")
+
+    server = proxy["server"]
+    if proxy.get("username") and proxy.get("password"):
+        proxy_url = server.replace(
+            "://",
+            f"://{proxy['username']}:{proxy['password']}@",
+            1,
+        )
+    else:
+        proxy_url = server
+
+    try:
+        response = requests.get(
+            "https://api.ipify.org?format=json",
+            proxies={"http": proxy_url, "https": proxy_url},
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.exceptions.ProxyError as error:
+        raise SystemExit(
+            "Proxy test failed: the proxy rejected the connection. "
+            "Check plan/payment/quota, credentials, and whether HTTPS CONNECT is allowed.\n"
+            f"Details: {error}"
+        ) from error
+    except requests.exceptions.RequestException as error:
+        raise SystemExit(f"Proxy test failed: {error}") from error
+    print(f"Proxy OK via {server}: {response.text}")

@@ -11,6 +11,10 @@ from tiktok_leads.numbers import floor_view_count
 class LeadEvaluation:
     lead: Lead | None
     skip_reason: str | None = None
+    # Stable, queryable code for the skip (verbose skip_reason is for logs).
+    # "no_email" means the creator passed followers+views but had no public
+    # email — the highest-yield candidate to re-check later.
+    skip_code: str | None = None
 
 
 def candidate_to_lead(
@@ -37,7 +41,12 @@ def evaluate_candidate(
         return LeadEvaluation(
             lead=None,
             skip_reason=f"followers below threshold ({followers} < {min_followers:,})",
+            skip_code="low_followers",
         )
+
+    emails = extract_emails(candidate.bio, *candidate.external_links)
+    if not emails:
+        return LeadEvaluation(lead=None, skip_reason="no email found", skip_code="no_email")
 
     average_views = candidate.average_views
     if average_views is None or average_views < min_average_views:
@@ -45,11 +54,8 @@ def evaluate_candidate(
         return LeadEvaluation(
             lead=None,
             skip_reason=f"average views below threshold ({views} < {min_average_views:,})",
+            skip_code="low_views",
         )
-
-    emails = extract_emails(candidate.bio, *candidate.external_links)
-    if not emails:
-        return LeadEvaluation(lead=None, skip_reason="no email found")
 
     rounded_average_views = floor_view_count(average_views)
 

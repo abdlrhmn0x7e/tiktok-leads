@@ -11,6 +11,7 @@ from typing import Any
 from TikTokApi import TikTokApi
 from TikTokApi.exceptions import EmptyResponseException
 
+from tiktok_leads.email_extractor import extract_emails
 from tiktok_leads.models import CandidateProfile
 from tiktok_leads.sources.base import TikTokSource
 
@@ -31,6 +32,9 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         *,
         ms_token: str | None,
         recent_video_count: int,
+        min_followers: int,
+        skip_videos_without_email: bool,
+        skip_videos_below_min_followers: bool,
         headless: bool,
         browser: str,
         starting_url: str,
@@ -47,6 +51,9 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
     ) -> None:
         self.ms_token = ms_token
         self.recent_video_count = recent_video_count
+        self.min_followers = min_followers
+        self.skip_videos_without_email = skip_videos_without_email
+        self.skip_videos_below_min_followers = skip_videos_below_min_followers
         self.headless = headless
         self.browser = browser
         self.starting_url = starting_url
@@ -154,8 +161,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     consecutive_blocked = 0
                     cooldowns += 1
                     if cooldowns > self.max_block_cooldowns_per_hashtag:
-                        logger.warning("stopping handle scan after repeated TikTok blocking")
-                        return
+                        raise TikTokBlockedError("repeated TikTok blocking during handle scan")
             await self._delay()
 
     async def profiles_from_hashtag(
@@ -171,7 +177,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         excluded = {handle.removeprefix("@").lower() for handle in exclude_handles or set()}
         seen_handles: set[str] = set()
         consecutive_blocked = 0
-        cooldowns = 0
+        blocked = False
         try:
             async for video in api.hashtag(name=tag).videos(count=limit):
                 author = self._get(video.as_dict, "author", default={})
@@ -195,18 +201,73 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                 else:
                     consecutive_blocked += 1
                     if await self._recover_if_blocked(consecutive_blocked, context=f"#{tag}"):
-                        cooldowns += 1
-                        logger.warning(
-                            "stopping #%s after TikTok blocking; next hashtag will use a fresh session",
-                            tag,
-                        )
-                        return
+                        blocked = True
+                        raise TikTokBlockedError(f"sustained TikTok blocking on #{tag}")
                 await self._delay()
+        except TikTokBlockedError:
+            raise
         except Exception:
             logger.exception("failed to crawl hashtag #%s", tag)
         finally:
-            if self.restart_session_between_hashtags:
+            # Don't spin up a fresh session if we're bailing out blocked — the
+            # daemon will back off and reopen the source on the next cycle.
+            if self.restart_session_between_hashtags and not blocked:
                 await self._restart_session()
+
+    async def profiles_from_search(
+        self,
+        query: str,
+        *,
+        niche: str,
+        limit: int,
+        exclude_handles: set[str] | None = None,
+    ) -> AsyncIterable[CandidateProfile]:
+        api = self._api()
+        excluded = {handle.removeprefix("@").lower() for handle in exclude_handles or set()}
+        seen_handles: set[str] = set()
+        consecutive_blocked = 0
+        blocked = False
+        try:
+            async for user in api.search.users(query, count=limit):
+                handle = self._handle_from_user(user)
+                normalized_handle = handle.removeprefix("@").lower()
+                if not handle or normalized_handle in seen_handles:
+                    continue
+                if normalized_handle in excluded:
+                    logger.info("skipping @%s from search '%s': handle already evaluated", handle, query)
+                    continue
+                seen_handles.add(normalized_handle)
+                profile = await self._safe_profile_from_user(
+                    api.user(username=handle),
+                    niche=niche,
+                    handle=handle,
+                    context=f"from search '{query}'",
+                )
+                if profile is not None:
+                    consecutive_blocked = 0
+                    yield profile
+                else:
+                    consecutive_blocked += 1
+                    if await self._recover_if_blocked(consecutive_blocked, context=f"search '{query}'"):
+                        blocked = True
+                        raise TikTokBlockedError(f"sustained TikTok blocking on search '{query}'")
+                await self._delay()
+        except TikTokBlockedError:
+            raise
+        except Exception:
+            logger.exception("failed to search users for '%s'", query)
+        finally:
+            if self.restart_session_between_hashtags and not blocked:
+                await self._restart_session()
+
+    def _handle_from_user(self, user: Any) -> str:
+        username = getattr(user, "username", None)
+        if username:
+            return str(username).strip()
+        data = getattr(user, "as_dict", {}) or {}
+        user_info = self._get(data, "user_info", "userInfo", default=data)
+        nested = self._get(user_info, "user", default=user_info)
+        return str(self._get(nested, "uniqueId", "unique_id", "unique_identifier", default="")).strip()
 
     async def _safe_profile_from_user(
         self,
@@ -243,13 +304,48 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         followers = self._parse_int(self._get(stats, "followerCount", "follower_count", default=None))
         links = self._extract_links(user_data)
 
+        if (
+            self.skip_videos_below_min_followers
+            and followers is not None
+            and followers < self.min_followers
+        ):
+            logger.info(
+                "skipping recent videos for @%s: followers below threshold (%s < %s)",
+                handle,
+                followers,
+                self.min_followers,
+            )
+            return CandidateProfile(
+                handle=handle,
+                profile_url=f"https://www.tiktok.com/@{handle}",
+                niche=niche,
+                followers_count=followers,
+                bio=bio,
+                external_links=links,
+                source="tiktokapi",
+            )
+
+        if self.skip_videos_without_email and not extract_emails(bio, *links):
+            logger.info("skipping recent videos for @%s: no public email in profile", handle)
+            return CandidateProfile(
+                handle=handle,
+                profile_url=f"https://www.tiktok.com/@{handle}",
+                niche=niche,
+                followers_count=followers,
+                bio=bio,
+                external_links=links,
+                source="tiktokapi",
+            )
+
         views: list[int] = []
+        hashtags: set[str] = set()
         async for video in user.videos(count=self.recent_video_count):
             video_data = video.as_dict
             video_stats = self._get(video_data, "stats", default={})
             play_count = self._parse_int(self._get(video_stats, "playCount", "play_count", default=None))
             if play_count is not None:
                 views.append(play_count)
+            hashtags.update(self._extract_hashtags(video_data))
 
         return CandidateProfile(
             handle=handle,
@@ -260,6 +356,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             bio=bio,
             external_links=links,
             source="tiktokapi",
+            discovered_hashtags=sorted(hashtags),
         )
 
     async def _delay(self) -> None:
@@ -302,6 +399,27 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             if isinstance(current, dict) and key in current:
                 return current[key]
         return default
+
+    def _extract_hashtags(self, video_data: dict[str, Any]) -> set[str]:
+        tags: set[str] = set()
+        # `textExtra` carries the hashtags actually used in the caption.
+        text_extra = self._get(video_data, "textExtra", default=[])
+        if isinstance(text_extra, list):
+            for item in text_extra:
+                if isinstance(item, dict):
+                    name = item.get("hashtagName")
+                    if name:
+                        tags.add(str(name).strip().lower())
+        # `challenges` is the structured hashtag list.
+        challenges = self._get(video_data, "challenges", default=[])
+        if isinstance(challenges, list):
+            for item in challenges:
+                if isinstance(item, dict):
+                    title = item.get("title")
+                    if title:
+                        tags.add(str(title).strip().lower())
+        tags.discard("")
+        return tags
 
     @staticmethod
     def _parse_int(value: Any) -> int | None:

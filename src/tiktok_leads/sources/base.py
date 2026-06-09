@@ -26,3 +26,14 @@ class TikTokSource(ABC):
         exclude_handles: set[str] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         raise NotImplementedError
+
+    @abstractmethod
+    def profiles_from_search(
+        self,
+        query: str,
+        *,
+        niche: str,
+        limit: int,
+        exclude_handles: set[str] | None = None,
+    ) -> AsyncIterable[CandidateProfile]:
+        raise NotImplementedError

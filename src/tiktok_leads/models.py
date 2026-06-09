@@ -16,6 +16,7 @@ class CandidateProfile:
     bio: str = ""
     external_links: list[str] = field(default_factory=list)
     source: str = "unknown"
+    discovered_hashtags: list[str] = field(default_factory=list)
 
     @property
     def average_views(self) -> int | None:

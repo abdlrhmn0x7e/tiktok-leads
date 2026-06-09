@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterable, Iterable
+from collections.abc import AsyncIterable, Iterable, Sized
 
 from tiktok_leads.db import LeadRepository
 from tiktok_leads.filters import evaluate_candidate
@@ -23,7 +23,7 @@ async def scrape_handles(
     min_followers: int,
     min_average_views: int,
 ) -> int:
-    handle_count = len(handles) if hasattr(handles, "__len__") else "provided"
+    handle_count = len(handles) if isinstance(handles, Sized) else "provided"
     logger.info("checking %s handle(s) for niche=%s", handle_count, niche)
     return await _process_candidates(
         source.profiles_from_handles(handles, niche=niche),
@@ -61,6 +61,33 @@ async def scrape_hashtag(
     )
 
 
+async def scrape_search(
+    source: TikTokSource,
+    repository: LeadRepository,
+    notifier: Notifier,
+    *,
+    query: str,
+    niche: str,
+    limit: int,
+    min_followers: int,
+    min_average_views: int,
+    exclude_handles: set[str] | None = None,
+) -> int:
+    logger.info("searching users for '%s' (niche=%s limit=%s)", query, niche, limit)
+    return await _process_candidates(
+        source.profiles_from_search(
+            query,
+            niche=niche,
+            limit=limit,
+            exclude_handles=exclude_handles,
+        ),
+        repository,
+        notifier,
+        min_followers=min_followers,
+        min_average_views=min_average_views,
+    )
+
+
 async def _process_candidates(
     candidates: AsyncIterable[CandidateProfile],
     repository: LeadRepository,
@@ -82,17 +109,21 @@ async def _process_candidates(
             display_average_views,
             candidate.source,
         )
-        repository.record_scraped_profile(
-            handle=candidate.handle,
-            niche=candidate.niche,
-            source=candidate.source,
-        )
 
         evaluation = evaluate_candidate(
             candidate,
             min_followers=min_followers,
             min_average_views=min_average_views,
         )
+        repository.record_scraped_profile(
+            handle=candidate.handle,
+            niche=candidate.niche,
+            source=candidate.source,
+            skip_reason=evaluation.skip_code,
+        )
+        if candidate.discovered_hashtags:
+            repository.record_discovered_hashtags(candidate.discovered_hashtags, niche=candidate.niche)
+
         if evaluation.lead is None:
             logger.info("skipped @%s: %s", candidate.handle or "unknown", evaluation.skip_reason)
             continue
