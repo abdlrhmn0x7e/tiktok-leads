@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterable, Iterable
+from collections.abc import AsyncIterable, Callable, Iterable
 
 from tiktok_leads.models import CandidateProfile
 
@@ -24,6 +24,8 @@ class TikTokSource(ABC):
         niche: str,
         limit: int,
         exclude_handles: set[str] | None = None,
+        start_cursor: int = 0,
+        on_cursor: Callable[[int], None] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         raise NotImplementedError
 

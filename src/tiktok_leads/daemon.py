@@ -169,6 +169,7 @@ async def _run_batch(
                     niche=item.niche,
                     min_followers=settings.min_followers,
                     min_average_views=settings.min_average_views,
+                    found_via="recheck",
                 )
                 continue
 
@@ -196,6 +197,7 @@ async def _run_batch(
                     min_followers=settings.min_followers,
                     min_average_views=settings.min_average_views,
                     exclude_handles=exclude_handles,
+                    feed_cursor_max_age_days=settings.feed_cursor_max_age_days,
                 )
                 if item.harvested:
                     repository.mark_hashtag_scraped(item.value, niche=item.niche)

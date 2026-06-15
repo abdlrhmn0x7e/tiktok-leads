@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from tiktok_leads.models import Lead
+from tiktok_leads.niches import is_harvestable_hashtag
 
 
 SCHEMA = """
@@ -29,11 +30,18 @@ CREATE TABLE IF NOT EXISTS scraped_profiles (
     niche TEXT NOT NULL,
     source TEXT NOT NULL,
     skip_reason TEXT,
+    found_via TEXT,
     last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_scraped_profiles_niche ON scraped_profiles(niche);
+
+CREATE TABLE IF NOT EXISTS feed_cursors (
+    feed TEXT PRIMARY KEY,
+    cursor INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS discovered_hashtags (
     hashtag TEXT NOT NULL,
@@ -60,8 +68,17 @@ class LeadRepository:
         self.connection.executescript(SCHEMA)
         self._migrate_scraped_profiles_handle_unique()
         self._migrate_add_scraped_profiles_skip_reason()
+        self._migrate_add_scraped_profiles_found_via()
         self._backfill_scraped_profiles_from_influencers()
         self.connection.commit()
+
+    def _migrate_add_scraped_profiles_found_via(self) -> None:
+        columns = {
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(scraped_profiles)").fetchall()
+        }
+        if "found_via" not in columns:
+            self.connection.execute("ALTER TABLE scraped_profiles ADD COLUMN found_via TEXT")
 
     def _migrate_add_scraped_profiles_skip_reason(self) -> None:
         columns = {
@@ -96,19 +113,21 @@ class LeadRepository:
         niche: str,
         source: str,
         skip_reason: str | None = None,
+        found_via: str | None = None,
     ) -> None:
         normalized_handle = handle.removeprefix("@").lower()
         self.connection.execute(
             """
-            INSERT INTO scraped_profiles (handle, niche, source, skip_reason, last_seen_at)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO scraped_profiles (handle, niche, source, skip_reason, found_via, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(handle) DO UPDATE SET
                 source = excluded.source,
                 niche = excluded.niche,
                 skip_reason = excluded.skip_reason,
+                found_via = excluded.found_via,
                 last_seen_at = CURRENT_TIMESTAMP
             """,
-            (normalized_handle, niche, source, skip_reason),
+            (normalized_handle, niche, source, skip_reason, found_via),
         )
         self.connection.commit()
 
@@ -152,10 +171,32 @@ class LeadRepository:
         ).fetchall()
         return [(str(row["handle"]), str(row["niche"])) for row in rows]
 
+    def get_feed_cursor(self, feed: str, *, max_age_days: int) -> int:
+        """Where to resume a feed crawl. Stale cursors fall back to 0 so we
+        periodically re-read the head of the feed, where new videos land."""
+        row = self.connection.execute(
+            "SELECT cursor FROM feed_cursors WHERE feed = ? AND updated_at >= datetime('now', ?)",
+            (feed, f"-{max_age_days} days"),
+        ).fetchone()
+        return int(row["cursor"]) if row else 0
+
+    def set_feed_cursor(self, feed: str, cursor: int) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO feed_cursors (feed, cursor, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(feed) DO UPDATE SET
+                cursor = excluded.cursor,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (feed, max(0, cursor)),
+        )
+        self.connection.commit()
+
     def record_discovered_hashtags(self, hashtags: list[str], *, niche: str) -> None:
         for raw in hashtags:
             tag = raw.removeprefix("#").strip().lower()
-            if not tag:
+            if not tag or not is_harvestable_hashtag(tag):
                 continue
             self.connection.execute(
                 """
@@ -178,7 +219,9 @@ class LeadRepository:
         not_scraped_within_days: int = 7,
     ) -> list[str]:
         """Harvested hashtags worth crawling: seen enough times and not scraped
-        recently. Ordered by how often we've seen them (strongest signal first)."""
+        recently. Ordered by how often we've seen them (strongest signal first).
+        Generic tags are re-filtered here too, so rows harvested before the
+        stoplist existed never get crawled."""
         rows = self.connection.execute(
             """
             SELECT hashtag FROM discovered_hashtags
@@ -186,11 +229,11 @@ class LeadRepository:
               AND times_seen >= ?
               AND (last_scraped_at IS NULL OR last_scraped_at < datetime('now', ?))
             ORDER BY times_seen DESC, last_seen_at DESC
-            LIMIT ?
             """,
-            (niche, min_times_seen, f"-{not_scraped_within_days} days", limit),
+            (niche, min_times_seen, f"-{not_scraped_within_days} days"),
         ).fetchall()
-        return [str(row["hashtag"]) for row in rows]
+        tags = [str(row["hashtag"]) for row in rows if is_harvestable_hashtag(str(row["hashtag"]))]
+        return tags[:limit]
 
     def mark_hashtag_scraped(self, hashtag: str, *, niche: str) -> None:
         tag = hashtag.removeprefix("#").strip().lower()

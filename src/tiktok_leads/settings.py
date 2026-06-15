@@ -29,11 +29,17 @@ class Settings(BaseSettings):
 
     # TikTok session settings.
     tiktok_ms_token: str | None = None
+    tiktok_ms_tokens: str | None = None  # comma-separated; ideally one per session
+    tiktok_num_sessions: int = 0  # 0 = auto: one per configured proxy (capped), else 1
     tiktok_browser_headless: bool = True
     tiktok_browser: str = "chromium"
     tiktok_starting_url: str = "https://www.tiktok.com"
     tiktok_session_timeout_ms: int = 90_000
     tiktok_session_retries: int = 2
+    # Resource types the browser refuses to load. The scraper only needs the
+    # JSON API responses, and TikTok's pages autoplay video — blocking these
+    # slashes proxy bandwidth. Empty string = load everything.
+    tiktok_suppress_resource_types: str = "image,media,font"
 
     # Lower-level compatibility knobs. Prefer the SCRAPE_* settings above.
     recent_video_count: int = 12
@@ -45,7 +51,9 @@ class Settings(BaseSettings):
     tiktok_block_cooldown_seconds: float = 10.0
     tiktok_max_block_cooldowns_per_hashtag: int = 1
     tiktok_restart_session_on_block: bool = True
-    tiktok_restart_session_between_hashtags: bool = True
+    # Off by default: a warm session with established cookies is both faster and
+    # less likely to be challenged than a fresh one. Restarting on block suffices.
+    tiktok_restart_session_between_hashtags: bool = False
     tiktok_suppress_library_errors: bool = True
     shuffle_hashtags: bool = True
 
@@ -66,13 +74,34 @@ class Settings(BaseSettings):
     discovery_harvested_recrawl_after_days: int = 7  # don't re-crawl a harvested tag sooner
     discovery_use_search: bool = True  # crawl api.search.users for niche phrases
     discovery_search_results_per_term: int = 20  # users requested per search phrase
+    # Hashtag feed cursors: resume each crawl where the last one stopped instead
+    # of re-reading the (mostly already-evaluated) head of the feed. A cursor
+    # older than this restarts from the top to pick up new videos; 0 disables
+    # persistence entirely.
+    feed_cursor_max_age_days: int = 14
     recheck_enabled: bool = True  # re-check stale profiles for newly-added emails
     recheck_after_days: int = 21  # a profile is "stale" once unseen this long
     recheck_handles_per_sweep: int = 10  # stale handles to re-check each sweep
 
     proxy_server: str | None = None
+    proxy_servers: str | None = None  # comma-separated; one session per proxy by default
     proxy_username: str | None = None
     proxy_password: str | None = None
+    webshare_api_key: str | None = None  # fetches your whole Webshare proxy list automatically
+
+    @property
+    def effective_ms_tokens(self) -> list[str]:
+        raw = self.tiktok_ms_tokens or self.tiktok_ms_token or ""
+        return [token.strip() for token in raw.split(",") if token.strip()]
+
+    @property
+    def effective_suppress_resource_types(self) -> list[str]:
+        return [t.strip() for t in self.tiktok_suppress_resource_types.split(",") if t.strip()]
+
+    @property
+    def effective_proxy_servers(self) -> list[str]:
+        raw = self.proxy_servers or self.proxy_server or ""
+        return [server.strip() for server in raw.split(",") if server.strip()]
 
     @property
     def effective_recent_video_count(self) -> int:

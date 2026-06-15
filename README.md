@@ -37,21 +37,60 @@ DISCOVERY_SEARCH=false             # TikTok search is useful but often block-pro
 Optional TikTok session config:
 
 ```env
-TIKTOK_MS_TOKEN=...
+TIKTOK_MS_TOKEN=...                # from your browser cookies; see below
 TIKTOK_BROWSER_HEADLESS=false
 TIKTOK_BROWSER=webkit
 TIKTOK_STARTING_URL=https://www.tiktok.com
 TIKTOK_SESSION_TIMEOUT_MS=90000
 TIKTOK_SESSION_RETRIES=2
 TIKTOK_SUPPRESS_LIBRARY_ERRORS=true
-
-# Optional proxy. For Webshare rotating endpoint this is usually:
-PROXY_SERVER=http://p.webshare.io:80
-PROXY_USERNAME=your_webshare_username
-PROXY_PASSWORD=your_webshare_password
 ```
 
 If TikTok returns `EmptyResponseException`, try `TIKTOK_BROWSER_HEADLESS=false` first. If it still fails, try `TIKTOK_BROWSER=webkit`, then add a fresh `TIKTOK_MS_TOKEN` from your browser session.
+
+### Proxies and parallel sessions
+
+Each proxy gets its own browser session, and requests round-robin across
+sessions — N proxies ≈ N× the effective rate limit while staying just as
+polite per IP. Three ways to configure proxies, in order of precedence:
+
+```env
+# 1. Webshare: fetches your whole proxy list from the API automatically.
+WEBSHARE_API_KEY=your_webshare_api_key
+
+# 2. Static list (e.g. Webshare static IPs): comma-separated host:port.
+PROXY_SERVERS=1.2.3.4:5699,5.6.7.8:5700,9.10.11.12:5701
+PROXY_USERNAME=shared_username        # applies to every proxy in the list
+PROXY_PASSWORD=shared_password        # or embed per-proxy: http://user:pass@host:port
+
+# 3. Single proxy (legacy):
+PROXY_SERVER=1.2.3.4:5699
+
+# Sessions: 0 (default) = one per proxy, capped at 5. Set explicitly to override.
+TIKTOK_NUM_SESSIONS=0
+
+# Ideally provide one fresh msToken per session (comma-separated):
+TIKTOK_MS_TOKENS=token1,token2,token3
+```
+
+To get an `msToken`: open tiktok.com logged in → DevTools → Application →
+Cookies → copy the `msToken` value. Grab each session's token from a different
+browser profile if you can. Tokens expire; refresh them when empty responses
+pick up again.
+
+Check connectivity of every configured proxy with:
+
+```bash
+uv run tiktok-leads --niche fitness --test-proxy
+```
+
+**Proxy bandwidth:** browser sessions are data-hungry — TikTok pages autoplay
+video, and metered plans (like Webshare's free 1GB/month) drain fast. A `402
+Payment Required` tunnel error means your quota is gone. To keep usage down the
+browser refuses to load heavy resources by default
+(`TIKTOK_SUPPRESS_RESOURCE_TYPES=image,media,font`); set it to an empty string
+to load everything. If quota runs out mid-month, comment out `PROXY_SERVERS`
+to fall back to your home IP until it resets.
 
 ## Usage
 
@@ -97,6 +136,7 @@ crashing.
 ```bash
 uv run tiktok-leads --daemon --niche fitness
 uv run tiktok-leads --daemon --niche fitness,mom   # rotate across several niches
+uv run tiktok-leads --daemon --niche fitness --no-crawl-video-hashtags
 ```
 
 To keep it alive across crashes, reboots aside, use the bundled relauncher
@@ -158,6 +198,10 @@ RECHECK_ENABLED=true
 RECHECK_AFTER_DAYS=21                         # a profile is "stale" once unseen this long
 RECHECK_HANDLES_PER_SWEEP=10                  # stale handles to re-check each sweep
 ```
+
+You can override harvested hashtag crawling per run with
+`--crawl-video-hashtags` or `--no-crawl-video-hashtags`. This only affects
+whether discovered video hashtags are added to the daemon work queue.
 
 > `api.search.users` needs an `ms_token` that has performed a search before —
 > set a fresh `TIKTOK_MS_TOKEN` from a logged-in browser session for best

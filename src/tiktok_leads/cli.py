@@ -9,12 +9,13 @@ import requests
 
 from tiktok_leads.daemon import run_daemon
 from tiktok_leads.db import LeadRepository
-from tiktok_leads.factory import build_proxy, build_source
+from tiktok_leads.factory import build_proxy_provider, build_source
 from tiktok_leads.models import Lead
 from tiktok_leads.niches import hashtags_for_niche
 from tiktok_leads.notifiers import build_notifier
 from tiktok_leads.runner import scrape_handles, scrape_hashtag
 from tiktok_leads.settings import Settings
+from tiktok_leads.sources.tiktokapi_source import TikTokBlockedError
 
 
 def main() -> None:
@@ -37,10 +38,26 @@ async def async_main() -> None:
     parser.add_argument("--test-notification", action="store_true", help="Send a fake lead notification and exit")
     parser.add_argument("--test-proxy", action="store_true", help="Test configured proxy connectivity and exit")
     parser.add_argument("--log-level", default="INFO", help="Logging level: DEBUG, INFO, WARNING, ERROR")
+    video_hashtags = parser.add_mutually_exclusive_group()
+    video_hashtags.add_argument(
+        "--crawl-video-hashtags",
+        dest="crawl_video_hashtags",
+        action="store_true",
+        default=None,
+        help="Crawl hashtags discovered from scraped videos in daemon mode",
+    )
+    video_hashtags.add_argument(
+        "--no-crawl-video-hashtags",
+        dest="crawl_video_hashtags",
+        action="store_false",
+        help="Do not crawl hashtags discovered from scraped videos in daemon mode",
+    )
     args = parser.parse_args()
     configure_logging(args.log_level)
 
     settings = Settings()
+    if args.crawl_video_hashtags is not None:
+        settings.discovery_use_harvested_hashtags = args.crawl_video_hashtags
     if settings.tiktok_suppress_library_errors:
         logging.getLogger("TikTokApi.tiktok").setLevel(logging.CRITICAL)
 
@@ -121,7 +138,16 @@ async def async_main() -> None:
                     min_followers=settings.min_followers,
                     min_average_views=settings.min_average_views,
                     exclude_handles=exclude_handles,
+                    feed_cursor_max_age_days=settings.feed_cursor_max_age_days,
                 )
+    except TikTokBlockedError as error:
+        logging.warning("stopped early because TikTok is blocking requests: %s", error)
+        print(
+            "Stopped early because TikTok is blocking requests. "
+            f"Inserted {inserted} new lead(s) before the block. "
+            "Use --daemon to back off and resume automatically, or slow the scrape/change proxy."
+        )
+        raise SystemExit(2) from None
     finally:
         repository.close()
 
@@ -138,33 +164,41 @@ def configure_logging(log_level: str) -> None:
 
 
 def test_proxy(settings: Settings) -> None:
-    proxy = build_proxy(settings)
-    if proxy is None:
-        raise SystemExit("PROXY_SERVER is not configured.")
-
-    server = proxy["server"]
-    if proxy.get("username") and proxy.get("password"):
-        proxy_url = server.replace(
-            "://",
-            f"://{proxy['username']}:{proxy['password']}@",
-            1,
-        )
-    else:
-        proxy_url = server
+    provider = build_proxy_provider(settings)
+    if provider is None:
+        raise SystemExit("No proxy configured (set PROXY_SERVERS, PROXY_SERVER, or WEBSHARE_API_KEY).")
 
     try:
-        response = requests.get(
-            "https://api.ipify.org?format=json",
-            proxies={"http": proxy_url, "https": proxy_url},
-            timeout=30,
-        )
-        response.raise_for_status()
-    except requests.exceptions.ProxyError as error:
-        raise SystemExit(
-            "Proxy test failed: the proxy rejected the connection. "
-            "Check plan/payment/quota, credentials, and whether HTTPS CONNECT is allowed.\n"
-            f"Details: {error}"
-        ) from error
-    except requests.exceptions.RequestException as error:
-        raise SystemExit(f"Proxy test failed: {error}") from error
-    print(f"Proxy OK via {server}: {response.text}")
+        proxies = provider.list_proxies()
+    except Exception as error:
+        raise SystemExit(f"Could not load proxy list: {error}") from error
+    if not proxies:
+        raise SystemExit("Proxy provider returned an empty proxy list.")
+
+    failures = 0
+    for proxy in proxies:
+        endpoint = f"{proxy.proxy_address}:{proxy.port}"
+        auth = f"{proxy.username}:{proxy.password}@" if proxy.username and proxy.password else ""
+        proxy_url = f"http://{auth}{endpoint}"
+        try:
+            response = requests.get(
+                "https://api.ipify.org?format=json",
+                proxies={"http": proxy_url, "https": proxy_url},
+                timeout=30,
+            )
+            response.raise_for_status()
+        except requests.exceptions.ProxyError as error:
+            failures += 1
+            print(
+                f"FAIL {endpoint}: the proxy rejected the connection. "
+                "Check plan/payment/quota, credentials, and whether HTTPS CONNECT is allowed. "
+                f"Details: {error}"
+            )
+        except requests.exceptions.RequestException as error:
+            failures += 1
+            print(f"FAIL {endpoint}: {error}")
+        else:
+            print(f"OK   {endpoint} -> {response.text}")
+    print(f"{len(proxies) - failures}/{len(proxies)} proxies OK; the scraper opens one session per proxy.")
+    if failures:
+        raise SystemExit(1)

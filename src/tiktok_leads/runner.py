@@ -22,6 +22,7 @@ async def scrape_handles(
     niche: str,
     min_followers: int,
     min_average_views: int,
+    found_via: str = "handle",
 ) -> int:
     handle_count = len(handles) if isinstance(handles, Sized) else "provided"
     logger.info("checking %s handle(s) for niche=%s", handle_count, niche)
@@ -31,6 +32,7 @@ async def scrape_handles(
         notifier,
         min_followers=min_followers,
         min_average_views=min_average_views,
+        found_via=found_via,
     )
 
 
@@ -45,19 +47,32 @@ async def scrape_hashtag(
     min_followers: int,
     min_average_views: int,
     exclude_handles: set[str] | None = None,
+    feed_cursor_max_age_days: int = 14,
 ) -> int:
-    logger.info("crawling hashtag #%s for niche=%s limit=%s", hashtag.removeprefix("#"), niche, limit)
+    tag = hashtag.removeprefix("#").strip().lower()
+    start_cursor = 0
+    on_cursor = None
+    if feed_cursor_max_age_days > 0:
+        feed_key = f"hashtag:{tag}"
+        start_cursor = repository.get_feed_cursor(feed_key, max_age_days=feed_cursor_max_age_days)
+        on_cursor = lambda cursor: repository.set_feed_cursor(feed_key, cursor)  # noqa: E731
+    logger.info(
+        "crawling hashtag #%s for niche=%s limit=%s cursor=%s", tag, niche, limit, start_cursor
+    )
     return await _process_candidates(
         source.profiles_from_hashtag(
             hashtag,
             niche=niche,
             limit=limit,
             exclude_handles=exclude_handles,
+            start_cursor=start_cursor,
+            on_cursor=on_cursor,
         ),
         repository,
         notifier,
         min_followers=min_followers,
         min_average_views=min_average_views,
+        found_via=f"#{tag}",
     )
 
 
@@ -85,6 +100,7 @@ async def scrape_search(
         notifier,
         min_followers=min_followers,
         min_average_views=min_average_views,
+        found_via=f"search:{query}",
     )
 
 
@@ -95,6 +111,7 @@ async def _process_candidates(
     *,
     min_followers: int,
     min_average_views: int,
+    found_via: str | None = None,
 ) -> int:
     inserted = 0
     async for candidate in candidates:
@@ -120,8 +137,11 @@ async def _process_candidates(
             niche=candidate.niche,
             source=candidate.source,
             skip_reason=evaluation.skip_code,
+            found_via=found_via,
         )
-        if candidate.discovered_hashtags:
+        # Hashtags from creators below the follower bar are noise-heavy; only
+        # harvest from accounts that at least qualified on followers.
+        if candidate.discovered_hashtags and evaluation.skip_code != "low_followers":
             repository.record_discovered_hashtags(candidate.discovered_hashtags, niche=candidate.niche)
 
         if evaluation.lead is None:
