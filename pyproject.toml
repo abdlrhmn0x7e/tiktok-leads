@@ -20,3 +20,6 @@ tiktok-leads = "tiktok_leads.cli:main"
 [build-system]
 requires = ["uv_build>=0.11.17,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+tiktokapi = { git = "https://github.com/abdlrhmn0x7e/TikTok-Api", rev = "2aec618c2736f52cd6d77664a3ae497c434520d4" }
