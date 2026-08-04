@@ -20,6 +20,7 @@ wheels/
 # Local scraper data
 data/*.sqlite
 data/*.sqlite-*
+data/backups/
 
 # Logs and runtime output
 *.log

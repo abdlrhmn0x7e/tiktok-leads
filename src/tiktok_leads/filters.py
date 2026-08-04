@@ -44,7 +44,7 @@ def evaluate_candidate(
             skip_code="low_followers",
         )
 
-    emails = extract_emails(candidate.bio, *candidate.external_links)
+    emails = extract_emails(candidate.bio, *candidate.external_links) or list(candidate.extra_emails)
     if not emails:
         return LeadEvaluation(lead=None, skip_reason="no email found", skip_code="no_email")
 

@@ -17,6 +17,9 @@ class CandidateProfile:
     external_links: list[str] = field(default_factory=list)
     source: str = "unknown"
     discovered_hashtags: list[str] = field(default_factory=list)
+    # Emails found one hop away (e.g. on the creator's Linktree page) rather
+    # than in the bio/profile itself.
+    extra_emails: list[str] = field(default_factory=list)
 
     @property
     def average_views(self) -> int | None:

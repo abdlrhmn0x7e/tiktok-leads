@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS discovered_hashtags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_discovered_hashtags_niche ON discovered_hashtags(niche);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -160,7 +166,7 @@ class LeadRepository:
             f"""
             SELECT sp.handle AS handle, sp.niche AS niche
             FROM scraped_profiles sp
-            LEFT JOIN influencers i ON i.handle = sp.handle
+            LEFT JOIN influencers i ON lower(replace(i.handle, '@', '')) = sp.handle
             WHERE i.handle IS NULL
               AND sp.skip_reason IN ({placeholders})
               AND sp.last_seen_at < datetime('now', ?)
@@ -321,12 +327,110 @@ class LeadRepository:
         except sqlite3.IntegrityError:
             return False
 
+    def unnotified_leads(self, limit: int = 20) -> list[Lead]:
+        """Leads whose notification failed at insert time (oldest first)."""
+        rows = self.connection.execute(
+            """
+            SELECT handle, profile_url, niche, email, followers_count, average_views, source
+            FROM influencers
+            WHERE notified_at IS NULL
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [
+            Lead(
+                handle=str(row["handle"]),
+                profile_url=str(row["profile_url"]),
+                niche=str(row["niche"]),
+                email=str(row["email"]),
+                followers_count=int(row["followers_count"]),
+                average_views=int(row["average_views"]),
+                source=str(row["source"]),
+            )
+            for row in rows
+        ]
+
     def mark_notified(self, email: str) -> None:
         self.connection.execute(
             "UPDATE influencers SET notified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE email = ?",
             (email,),
         )
         self.connection.commit()
+
+    def get_meta(self, key: str) -> str | None:
+        row = self.connection.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO meta (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+            """,
+            (key, value),
+        )
+        self.connection.commit()
+
+    def stats(self) -> dict:
+        """Aggregate pipeline health numbers for --stats and the daily digest."""
+
+        def rows(query: str, *params: object) -> list[sqlite3.Row]:
+            return self.connection.execute(query, params).fetchall()
+
+        def scalar(query: str, *params: object) -> int:
+            row = self.connection.execute(query, params).fetchone()
+            return int(row[0]) if row and row[0] is not None else 0
+
+        return {
+            "total_leads": scalar("SELECT COUNT(*) FROM influencers"),
+            "leads_by_niche": [
+                (str(r["niche"]), int(r["n"]))
+                for r in rows(
+                    "SELECT niche, COUNT(*) n FROM influencers GROUP BY niche ORDER BY n DESC"
+                )
+            ],
+            "leads_last_7_days": [
+                (str(r["day"]), int(r["n"]))
+                for r in rows(
+                    """
+                    SELECT date(created_at) day, COUNT(*) n FROM influencers
+                    WHERE created_at >= datetime('now', '-7 days')
+                    GROUP BY day ORDER BY day DESC
+                    """
+                )
+            ],
+            "evaluated_total": scalar("SELECT COUNT(*) FROM scraped_profiles"),
+            "evaluated_last_24h": scalar(
+                "SELECT COUNT(*) FROM scraped_profiles WHERE last_seen_at >= datetime('now', '-1 day')"
+            ),
+            "leads_last_24h": scalar(
+                "SELECT COUNT(*) FROM influencers WHERE created_at >= datetime('now', '-1 day')"
+            ),
+            "skip_reasons": [
+                (str(r["skip_reason"] or "lead"), int(r["n"]))
+                for r in rows(
+                    "SELECT skip_reason, COUNT(*) n FROM scraped_profiles GROUP BY skip_reason ORDER BY n DESC"
+                )
+            ],
+            # Which hashtags/searches produced actual leads (skip_reason NULL = lead).
+            "lead_sources": [
+                (str(r["found_via"]), int(r["n"]))
+                for r in rows(
+                    """
+                    SELECT found_via, COUNT(*) n FROM scraped_profiles
+                    WHERE skip_reason IS NULL AND found_via IS NOT NULL
+                    GROUP BY found_via ORDER BY n DESC LIMIT 15
+                    """
+                )
+            ],
+            "harvested_hashtags": scalar("SELECT COUNT(*) FROM discovered_hashtags"),
+            "pending_recheck": scalar(
+                "SELECT COUNT(*) FROM scraped_profiles WHERE skip_reason = 'no_email'"
+            ),
+        }
 
     def close(self) -> None:
         self.connection.close()

@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 tiktok-leads = "tiktok_leads.cli:main"
+tiktok-leads-upload = "tiktok_leads.upload:main"
 
 [build-system]
 requires = ["uv_build>=0.11.17,<0.12.0"]

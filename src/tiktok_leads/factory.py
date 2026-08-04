@@ -105,4 +105,7 @@ def build_source(settings: Settings) -> TikTokApiSource:
         restart_session_on_block=settings.tiktok_restart_session_on_block,
         restart_session_between_hashtags=settings.tiktok_restart_session_between_hashtags,
         proxy_provider=proxy_provider,
+        resolve_bio_link_emails=settings.resolve_bio_link_emails,
+        bio_link_timeout_seconds=settings.bio_link_timeout_seconds,
+        bio_link_max_fetches=settings.bio_link_max_fetches,
     )

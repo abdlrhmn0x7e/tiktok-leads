@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from dataclasses import dataclass
+from datetime import date
 
 from tiktok_leads.db import LeadRepository
 from tiktok_leads.factory import build_source
@@ -11,6 +13,7 @@ from tiktok_leads.niches import hashtags_for_niche, search_terms_for_niche
 from tiktok_leads.notifiers import Notifier
 from tiktok_leads.runner import scrape_handles, scrape_hashtag, scrape_search
 from tiktok_leads.settings import Settings
+from tiktok_leads.sources import TikTokApiSource
 from tiktok_leads.sources.tiktokapi_source import TikTokBlockedError
 
 logger = logging.getLogger(__name__)
@@ -94,6 +97,20 @@ async def run_daemon(
 
     queue: list[WorkItem] = []
     block_backoff = settings.daemon_block_backoff_initial_seconds
+    # The browser session is reused across cycles: a fresh source means every
+    # session cold-loads tiktok.com's multi-megabyte bundle through the proxy,
+    # so we only pay that on blocks, errors, or scheduled recycling.
+    source: TikTokApiSource | None = None
+    source_opened_at = 0.0
+
+    async def close_source() -> None:
+        nonlocal source
+        if source is not None:
+            try:
+                await source.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("daemon: failed to close source cleanly")
+            source = None
 
     try:
         while True:
@@ -107,12 +124,28 @@ async def run_daemon(
                     continue
                 logger.info("daemon: new sweep queued with %s work item(s)", len(queue))
 
+            _retry_unnotified(repository, notifier)
+            if settings.notification_daily_digest:
+                _maybe_send_digest(repository, notifier)
+
             batch = [queue.pop() for _ in range(min(settings.effective_burst_size, len(queue)))]
             logger.info("daemon: starting cycle: %s", ", ".join(i.label for i in batch))
 
+            session_age = time.monotonic() - source_opened_at
+            if source is not None and session_age > settings.daemon_session_max_age_seconds:
+                logger.info(
+                    "daemon: recycling browser session after %.0fmin", session_age / 60
+                )
+                await close_source()
+
             try:
-                inserted = await _run_batch(settings, repository, notifier, batch, limit)
+                if source is None:
+                    source = build_source(settings)
+                    await source.__aenter__()
+                    source_opened_at = time.monotonic()
+                inserted = await _run_batch(source, settings, repository, notifier, batch, limit)
             except TikTokBlockedError as error:
+                await close_source()
                 queue.extend(batch)
                 random.shuffle(queue)
                 sleep_for = block_backoff + random.uniform(
@@ -131,6 +164,7 @@ async def run_daemon(
                 continue
             except Exception:
                 logger.exception("daemon: unexpected error in cycle; pausing then continuing")
+                await close_source()
                 await asyncio.sleep(settings.daemon_error_cooldown_seconds)
                 continue
 
@@ -145,60 +179,107 @@ async def run_daemon(
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.info("daemon: shutting down")
         raise
+    finally:
+        await close_source()
+
+
+def _maybe_send_digest(repository: LeadRepository, notifier: Notifier) -> None:
+    """Once per calendar day, send a one-message pipeline summary."""
+    today = date.today().isoformat()
+    last = repository.get_meta("last_digest_date")
+    if last == today:
+        return
+    if last is None:
+        # First run ever: start the clock without sending an all-zeros digest.
+        repository.set_meta("last_digest_date", today)
+        return
+    stats = repository.stats()
+    top_sources = ", ".join(f"{via} ({n})" for via, n in stats["lead_sources"][:3]) or "none yet"
+    message = "\n".join(
+        [
+            "Daily scraping digest",
+            f"- New leads (24h): {stats['leads_last_24h']}",
+            f"- Profiles evaluated (24h): {stats['evaluated_last_24h']}",
+            f"- Total leads: {stats['total_leads']}",
+            f"- Awaiting email re-check: {stats['pending_recheck']}",
+            f"- Top lead sources: {top_sources}",
+        ]
+    )
+    try:
+        notifier.send_text(message)
+    except Exception:
+        logger.exception("daemon: failed to send daily digest; will retry next cycle")
+        return
+    repository.set_meta("last_digest_date", today)
+    logger.info("daemon: sent daily digest")
+
+
+def _retry_unnotified(repository: LeadRepository, notifier: Notifier) -> None:
+    """Re-send notifications for leads whose webhook call failed at insert
+    time — otherwise they'd sit in the database unseen forever."""
+    for lead in repository.unnotified_leads():
+        try:
+            notifier.send(lead)
+        except Exception:
+            # The channel is probably down; the next cycle will retry.
+            logger.exception("daemon: failed to re-send notification for @%s", lead.handle)
+            return
+        repository.mark_notified(lead.email)
+        logger.info("daemon: sent pending notification for @%s", lead.handle)
 
 
 async def _run_batch(
+    source: TikTokApiSource,
     settings: Settings,
     repository: LeadRepository,
     notifier: Notifier,
     batch: list[WorkItem],
     limit: int,
 ) -> int:
-    """Open one source session and run each work item in this batch."""
+    """Run each work item in this batch on the shared source session."""
     inserted = 0
-    async with build_source(settings) as source:
-        for item in batch:
-            if item.kind == "recheck":
-                # Re-check a stale handle directly — no exclusion, we *want* to
-                # re-evaluate it in case a public email was added.
-                inserted += await scrape_handles(
-                    source,
-                    repository,
-                    notifier,
-                    handles=[item.value],
-                    niche=item.niche,
-                    min_followers=settings.min_followers,
-                    min_average_views=settings.min_average_views,
-                    found_via="recheck",
-                )
-                continue
+    for item in batch:
+        if item.kind == "recheck":
+            # Re-check a stale handle directly — no exclusion, we *want* to
+            # re-evaluate it in case a public email was added.
+            inserted += await scrape_handles(
+                source,
+                repository,
+                notifier,
+                handles=[item.value],
+                niche=item.niche,
+                min_followers=settings.min_followers,
+                min_average_views=settings.min_average_views,
+                found_via="recheck",
+            )
+            continue
 
-            exclude_handles = repository.excluded_handles(settings.recheck_after_days)
-            if item.kind == "search":
-                inserted += await scrape_search(
-                    source,
-                    repository,
-                    notifier,
-                    query=item.value,
-                    niche=item.niche,
-                    limit=settings.discovery_search_results_per_term,
-                    min_followers=settings.min_followers,
-                    min_average_views=settings.min_average_views,
-                    exclude_handles=exclude_handles,
-                )
-            else:  # hashtag (seed or harvested)
-                inserted += await scrape_hashtag(
-                    source,
-                    repository,
-                    notifier,
-                    hashtag=item.value,
-                    niche=item.niche,
-                    limit=limit,
-                    min_followers=settings.min_followers,
-                    min_average_views=settings.min_average_views,
-                    exclude_handles=exclude_handles,
-                    feed_cursor_max_age_days=settings.feed_cursor_max_age_days,
-                )
-                if item.harvested:
-                    repository.mark_hashtag_scraped(item.value, niche=item.niche)
+        exclude_handles = repository.excluded_handles(settings.recheck_after_days)
+        if item.kind == "search":
+            inserted += await scrape_search(
+                source,
+                repository,
+                notifier,
+                query=item.value,
+                niche=item.niche,
+                limit=settings.discovery_search_results_per_term,
+                min_followers=settings.min_followers,
+                min_average_views=settings.min_average_views,
+                exclude_handles=exclude_handles,
+            )
+        else:  # hashtag (seed or harvested)
+            inserted += await scrape_hashtag(
+                source,
+                repository,
+                notifier,
+                hashtag=item.value,
+                niche=item.niche,
+                limit=limit,
+                min_followers=settings.min_followers,
+                min_average_views=settings.min_average_views,
+                exclude_handles=exclude_handles,
+                feed_cursor_max_age_days=settings.feed_cursor_max_age_days,
+            )
+            if item.harvested:
+                repository.mark_hashtag_scraped(item.value, niche=item.niche)
     return inserted

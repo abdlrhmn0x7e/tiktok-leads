@@ -13,9 +13,13 @@ class Settings(BaseSettings):
     min_followers: int = 10_000
     min_average_views: int = 10_000
     notification_channel: str = "none"
+    notification_daily_digest: bool = True  # daemon sends a once-a-day summary
     discord_webhook_url: str | None = None
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+    # leads-hub Convex ingest (NOTIFICATION_CHANNEL=convex).
+    convex_site_url: str | None = None  # e.g. https://<deployment>.convex.site
+    convex_ingest_api_key: str | None = None
 
     # Primary scraping controls.
     scrape_mode: Literal["polite", "balanced", "aggressive"] = "polite"
@@ -39,7 +43,7 @@ class Settings(BaseSettings):
     # Resource types the browser refuses to load. The scraper only needs the
     # JSON API responses, and TikTok's pages autoplay video — blocking these
     # slashes proxy bandwidth. Empty string = load everything.
-    tiktok_suppress_resource_types: str = "image,media,font"
+    tiktok_suppress_resource_types: str = "image,media,font,stylesheet"
 
     # Lower-level compatibility knobs. Prefer the SCRAPE_* settings above.
     recent_video_count: int = 12
@@ -66,6 +70,10 @@ class Settings(BaseSettings):
     daemon_block_backoff_max_seconds: float = 21_600.0  # cap backoff at 6h
     daemon_block_backoff_multiplier: float = 2.0  # exponential growth per repeated block
     daemon_block_backoff_jitter_seconds: float = 600.0  # up to +10m randomness
+    # The daemon reuses one browser session across cycles (each fresh session
+    # cold-loads tiktok.com's multi-MB bundle through the proxy). Recycle it
+    # after this long so cookies/tokens never go stale.
+    daemon_session_max_age_seconds: float = 14_400.0  # 4h
 
     # Discovery expansion (lead-volume features).
     discovery_use_harvested_hashtags: bool = True  # crawl hashtags found in scraped videos
@@ -79,6 +87,11 @@ class Settings(BaseSettings):
     # older than this restarts from the top to pick up new videos; 0 disables
     # persistence entirely.
     feed_cursor_max_age_days: int = 14
+    # Follow a creator's bio link (Linktree, Beacons, Stan…) when the bio has
+    # no email — these are ordinary pages fetched directly, no proxy/TikTok.
+    resolve_bio_link_emails: bool = True
+    bio_link_timeout_seconds: float = 10.0
+    bio_link_max_fetches: int = 2  # pages fetched per profile at most
     recheck_enabled: bool = True  # re-check stale profiles for newly-added emails
     recheck_after_days: int = 21  # a profile is "stale" once unseen this long
     recheck_handles_per_sweep: int = 10  # stale handles to re-check each sweep
