@@ -215,10 +215,13 @@ def test_proxy(settings: Settings) -> None:
     for proxy in proxies:
         endpoint = f"{proxy.proxy_address}:{proxy.port}"
         auth = f"{proxy.username}:{proxy.password}@" if proxy.username and proxy.password else ""
-        proxy_url = f"http://{auth}{endpoint}"
+        proxy_protocol = proxy.protocols[0] if proxy.protocols else "http"
+        if proxy_protocol not in {"http", "socks5"}:
+            raise ValueError(f"Unsupported proxy protocol for {endpoint}: {proxy_protocol}")
+        proxy_url = f"{proxy_protocol}://{auth}{endpoint}"
         try:
             response = requests.get(
-                "https://api.ipify.org?format=json",
+                "https://ipv4.webshare.io/",
                 proxies={"http": proxy_url, "https": proxy_url},
                 timeout=30,
             )
@@ -227,7 +230,7 @@ def test_proxy(settings: Settings) -> None:
             failures += 1
             print(
                 f"FAIL {endpoint}: the proxy rejected the connection. "
-                "Check plan/payment/quota, credentials, and whether HTTPS CONNECT is allowed. "
+                "Check plan/payment/quota, credentials, and whether HTTPS traffic is allowed. "
                 f"Details: {error}"
             )
         except requests.exceptions.RequestException as error:

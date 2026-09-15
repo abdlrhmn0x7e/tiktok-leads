@@ -58,10 +58,10 @@ polite per IP. Three ways to configure proxies, in order of precedence:
 # 1. Webshare: fetches your whole proxy list from the API automatically.
 WEBSHARE_API_KEY=your_webshare_api_key
 
-# 2. Static list (e.g. Webshare static IPs): comma-separated host:port.
-PROXY_SERVERS=1.2.3.4:5699,5.6.7.8:5700,9.10.11.12:5701
+# 2. Static list (e.g. Webshare static IPs): comma-separated proxy URLs.
+PROXY_SERVERS=socks5://1.2.3.4:5699,socks5://5.6.7.8:5700,socks5://9.10.11.12:5701
 PROXY_USERNAME=shared_username        # applies to every proxy in the list
-PROXY_PASSWORD=shared_password        # or embed per-proxy: http://user:pass@host:port
+PROXY_PASSWORD=shared_password        # or embed per-proxy: socks5://user:pass@host:port
 
 # 3. Single proxy (legacy):
 PROXY_SERVER=1.2.3.4:5699
