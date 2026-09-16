@@ -4,10 +4,24 @@ Local TikTok lead scraper using `uv`, SQLite, and a replaceable TikTok source ad
 
 ## Setup
 
+On systems other than NixOS:
+
 ```bash
 uv sync
 uv run playwright install chromium
 ```
+
+On NixOS, use the development shell so Playwright uses the browser build from
+nixpkgs instead of its incompatible generic Linux binary:
+
+```bash
+nix develop
+uv sync
+uv run tiktok-leads --niche mom --daemon
+```
+
+Do not run `uv run playwright install chromium` inside the Nix shell. The shell
+sets `PLAYWRIGHT_BROWSERS_PATH` to nixpkgs' patched browser package.
 
 Create a `.env` file if you want notifications:
 
