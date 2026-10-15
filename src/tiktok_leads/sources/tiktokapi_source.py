@@ -24,6 +24,17 @@ from tiktok_leads.sources.base import TikTokSource
 
 logger = logging.getLogger(__name__)
 
+# A hashtag crawl gives up after this many raw feed items per requested new
+# candidate, so a feed whose every author is already evaluated still ends.
+MAX_FEED_ITEMS_PER_NEW_CANDIDATE = 5
+
+
+class _Counter:
+    __slots__ = ("value",)
+
+    def __init__(self) -> None:
+        self.value = 0
+
 # Exceptions that mean TikTok is rate-limiting/bot-detecting us, as opposed to
 # a profile being deleted, private, or renamed. Only these count toward the
 # consecutive-blocked counter — otherwise a run of dead profiles triggers
@@ -218,8 +229,12 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         consecutive_blocked = 0
         blocked = False
         try:
+            # `limit` counts creators we actually evaluate. Already-evaluated
+            # handles are free (no request) and don't consume it — otherwise a
+            # saturated feed head would exhaust the budget on nothing new.
+            inspected = _Counter()
             async for item in self._hashtag_feed_items(
-                api, tag, limit=limit, cursor=start_cursor, on_cursor=on_cursor
+                api, tag, limit=limit, cursor=start_cursor, on_cursor=on_cursor, inspected=inspected
             ):
                 self._feed_block_streak = 0
                 author = self._get(item, "author", default={})
@@ -231,6 +246,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     logger.info("skipping @%s from #%s: handle already evaluated", handle, tag)
                     continue
                 seen_handles.add(normalized_handle)
+                inspected.value += 1
 
                 prefiltered = self._candidate_from_feed_item(item, niche=niche, handle=handle)
                 if prefiltered is not None:
@@ -346,15 +362,22 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         limit: int,
         cursor: int,
         on_cursor: Callable[[int], None] | None,
+        inspected: _Counter | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Same pagination as Hashtag.videos, but starts at an arbitrary cursor
         and reports the next page's cursor after each fully-consumed page (0
-        once the feed is exhausted, so the next crawl wraps back to the top)."""
+        once the feed is exhausted, so the next crawl wraps back to the top).
+
+        When `inspected` is given, the caller increments it for each item it
+        actually evaluates and pagination stops once that reaches `limit`.
+        Raw feed items are still capped (MAX_FEED_ITEMS_PER_NEW_CANDIDATE x
+        limit) so a fully-seen feed can't page forever."""
         challenge = api.hashtag(name=tag)
         if getattr(challenge, "id", None) is None:
             await challenge.info()
         found = 0
-        while found < limit:
+        raw_cap = limit * MAX_FEED_ITEMS_PER_NEW_CANDIDATE
+        while (inspected.value if inspected is not None else found) < limit and found < raw_cap:
             resp = await api.make_request(
                 url="https://www.tiktok.com/api/challenge/item_list/",
                 params={"challengeID": challenge.id, "count": 30, "cursor": cursor},

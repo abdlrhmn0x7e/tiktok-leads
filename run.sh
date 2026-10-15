@@ -18,6 +18,8 @@ cd "$(dirname "$0")"
 
 NICHES="${1:-fitness}"
 RESTART_DELAY="${RESTART_DELAY:-60}"
+# New (unevaluated) creators to inspect per hashtag visit.
+LIMIT="${LIMIT:-150}"
 
 mkdir -p logs data/backups
 
@@ -45,7 +47,7 @@ while true; do
   TODAY="$(date '+%Y-%m-%d')"
   backup_database "${TODAY}"
   echo "[run.sh] $(date '+%Y-%m-%d %H:%M:%S') starting daemon for niches=${NICHES} (log: logs/daemon-${TODAY}.log)"
-  ${KEEP_AWAKE} uv run tiktok-leads --daemon --niche "${NICHES}" 2>&1 | tee -a "logs/daemon-${TODAY}.log" || true
+  ${KEEP_AWAKE} uv run tiktok-leads --daemon --niche "${NICHES}" --limit "${LIMIT}" 2>&1 | tee -a "logs/daemon-${TODAY}.log" || true
   echo "[run.sh] $(date '+%Y-%m-%d %H:%M:%S') daemon exited; restarting in ${RESTART_DELAY}s"
   sleep "${RESTART_DELAY}"
 done

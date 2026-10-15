@@ -37,7 +37,9 @@ def normalize_proxy_server(proxy_server: str) -> str:
 
 def parse_proxy(server: str, index: int, settings: Settings) -> Proxy:
     """Parse 'host:port', 'scheme://host:port', or 'scheme://user:pass@host:port'.
-    Entries without inline credentials fall back to PROXY_USERNAME/PROXY_PASSWORD."""
+    Entries without inline credentials fall back to PROXY_USERNAME/PROXY_PASSWORD.
+    Map socks5h to Playwright's socks5 scheme, which resolves DNS through the proxy.
+    """
     parsed = urlsplit(normalize_proxy_server(server))
     try:
         port = parsed.port
@@ -56,7 +58,7 @@ def parse_proxy(server: str, index: int, settings: Settings) -> Proxy:
         password=password,
         proxy_address=parsed.hostname,
         port=port,
-        protocols=[parsed.scheme] if parsed.scheme else None,
+        protocols=["socks5" if parsed.scheme == "socks5h" else parsed.scheme] if parsed.scheme else None,
     )
 
 
