@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # cold-loads tiktok.com's multi-MB bundle through the proxy). Recycle it
     # after this long so cookies/tokens never go stale.
     daemon_session_max_age_seconds: float = 14_400.0  # 4h
+    # Fraction of each sweep spent on TRENDING_HASHTAGS/TRENDING_SEARCH_TERMS.
+    # The client wants 25-50% of daily outreach tied to a trending topic.
+    daemon_trending_share: float = 0.4
 
     # Discovery expansion (lead-volume features).
     discovery_use_harvested_hashtags: bool = True  # crawl hashtags found in scraped videos

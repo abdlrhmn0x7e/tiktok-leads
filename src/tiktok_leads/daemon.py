@@ -9,7 +9,13 @@ from datetime import date
 
 from tiktok_leads.db import LeadRepository
 from tiktok_leads.factory import build_source
-from tiktok_leads.niches import hashtags_for_niche, search_terms_for_niche
+from tiktok_leads.niches import (
+    hashtags_for_niche,
+    search_terms_for_niche,
+    trending_hashtags_for_niche,
+    trending_found_via,
+    trending_search_terms_for_niche,
+)
 from tiktok_leads.notifiers import Notifier
 from tiktok_leads.runner import scrape_handles, scrape_hashtag, scrape_search
 from tiktok_leads.settings import Settings
@@ -25,21 +31,26 @@ class WorkItem:
     niche: str
     value: str  # hashtag, search phrase, or handle
     harvested: bool = False  # hashtag came from the harvesting flywheel
+    trending: bool = False  # from TRENDING_HASHTAGS / TRENDING_SEARCH_TERMS
 
     @property
     def label(self) -> str:
+        trend = "[trend]" if self.trending else ""
         if self.kind == "hashtag":
-            return f"#{self.value}{'*' if self.harvested else ''}({self.niche})"
+            return f"#{self.value}{'*' if self.harvested else ''}{trend}({self.niche})"
         if self.kind == "search":
-            return f"search:{self.value!r}({self.niche})"
+            return f"search:{self.value!r}{trend}({self.niche})"
         return f"recheck:@{self.value}({self.niche})"
 
 
 def _build_queue(settings: Settings, repository: LeadRepository, niches: list[str]) -> list[WorkItem]:
     """Build a shuffled work queue for one sweep: seed hashtags + harvested
-    hashtags + user-searches + stale re-checks."""
+    hashtags + user-searches + stale re-checks, with trending-topic items
+    making up settings.daemon_trending_share of it."""
     items: list[WorkItem] = []
+    trending: list[WorkItem] = []
     seen: set[tuple[str, str, str]] = set()
+    trending_sources = trending_found_via()
 
     def add(item: WorkItem) -> None:
         key = (item.kind, item.niche, item.value.lower())
@@ -48,6 +59,13 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
             items.append(item)
 
     for niche in niches:
+        for tag in trending_hashtags_for_niche(niche):
+            seen.add(("hashtag", niche, tag.lower()))
+            trending.append(WorkItem("hashtag", niche, tag, trending=True))
+        if settings.effective_discovery_search:
+            for term in trending_search_terms_for_niche(niche):
+                seen.add(("search", niche, term.lower()))
+                trending.append(WorkItem("search", niche, term, trending=True))
         for tag in hashtags_for_niche(niche):
             add(WorkItem("hashtag", niche, tag))
         if settings.discovery_use_harvested_hashtags:
@@ -57,7 +75,8 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
                 min_times_seen=settings.discovery_harvested_min_mentions,
                 not_scraped_within_days=settings.discovery_harvested_recrawl_after_days,
             ):
-                add(WorkItem("hashtag", niche, tag, harvested=True))
+                if f"#{tag.lower()}" not in trending_sources:
+                    add(WorkItem("hashtag", niche, tag, harvested=True))
         if settings.effective_discovery_search:
             for term in search_terms_for_niche(niche):
                 add(WorkItem("search", niche, term))
@@ -69,8 +88,29 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
         ):
             add(WorkItem("recheck", handle_niche, handle))
 
+    items.extend(_trending_slots(trending, general_count=len(items), share=settings.daemon_trending_share))
     random.shuffle(items)
     return items
+
+
+def _trending_slots(trending: list[WorkItem], *, general_count: int, share: float) -> list[WorkItem]:
+    """Trending items sized so they are `share` of the sweep. There are fewer
+    trending tags than general ones, so hashtags repeat within a sweep; each
+    repeat resumes the tag's feed cursor, so it still reaches new creators.
+    Searches run once: a repeat would return the same users."""
+    if not trending:
+        return []
+    share = min(max(share, 0.0), 1.0)
+    if general_count == 0 or share >= 1.0:
+        return list(trending)
+    count = round(general_count * share / (1.0 - share))
+    once = [item for item in trending if item.kind != "hashtag"]
+    repeatable = [item for item in trending if item.kind == "hashtag"]
+    random.shuffle(repeatable)
+    slots = once[:count]
+    if repeatable:
+        slots += [repeatable[i % len(repeatable)] for i in range(count - len(slots))]
+    return slots
 
 
 async def run_daemon(

@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from tiktok_leads.models import Lead
-from tiktok_leads.niches import is_harvestable_hashtag
+from tiktok_leads.niches import is_harvestable_hashtag, trending_found_via
 
 
 SCHEMA = """
@@ -331,10 +331,12 @@ class LeadRepository:
         """Leads whose notification failed at insert time (oldest first)."""
         rows = self.connection.execute(
             """
-            SELECT handle, profile_url, niche, email, followers_count, average_views, source
-            FROM influencers
-            WHERE notified_at IS NULL
-            ORDER BY created_at ASC
+            SELECT i.handle, i.profile_url, i.niche, i.email, i.followers_count,
+                   i.average_views, i.source, sp.found_via
+            FROM influencers i
+            LEFT JOIN scraped_profiles sp ON sp.handle = lower(replace(i.handle, '@', ''))
+            WHERE i.notified_at IS NULL
+            ORDER BY i.created_at ASC
             LIMIT ?
             """,
             (limit,),
@@ -348,6 +350,7 @@ class LeadRepository:
                 followers_count=int(row["followers_count"]),
                 average_views=int(row["average_views"]),
                 source=str(row["source"]),
+                found_via=row["found_via"],
             )
             for row in rows
         ]
@@ -376,6 +379,7 @@ class LeadRepository:
 
     def stats(self) -> dict:
         """Aggregate pipeline health numbers for --stats and the daily digest."""
+        trending = sorted(trending_found_via())
 
         def rows(query: str, *params: object) -> list[sqlite3.Row]:
             return self.connection.execute(query, params).fetchall()
@@ -426,6 +430,15 @@ class LeadRepository:
                     """
                 )
             ],
+            "trending_leads_last_7_days": scalar(
+                f"""
+                SELECT COUNT(*) FROM influencers i
+                JOIN scraped_profiles sp ON sp.handle = lower(ltrim(i.handle, '@'))
+                WHERE i.created_at >= datetime('now', '-7 days')
+                  AND sp.found_via IN ({",".join("?" * len(trending))})
+                """,
+                *trending,
+            ),
             "harvested_hashtags": scalar("SELECT COUNT(*) FROM discovered_hashtags"),
             "pending_recheck": scalar(
                 "SELECT COUNT(*) FROM scraped_profiles WHERE skip_reason = 'no_email'"

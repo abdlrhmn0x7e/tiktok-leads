@@ -35,4 +35,5 @@ class Lead:
     followers_count: int
     average_views: int
     source: str
+    found_via: str | None = None  # "#tag" or "search:term" that surfaced the creator
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

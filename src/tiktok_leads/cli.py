@@ -11,7 +11,7 @@ from tiktok_leads.daemon import run_daemon
 from tiktok_leads.db import LeadRepository
 from tiktok_leads.factory import build_proxy_provider, build_source
 from tiktok_leads.models import Lead
-from tiktok_leads.niches import hashtags_for_niche
+from tiktok_leads.niches import hashtags_for_niche, trending_hashtags_for_niche
 from tiktok_leads.notifiers import build_notifier
 from tiktok_leads.runner import scrape_handles, scrape_hashtag
 from tiktok_leads.settings import Settings
@@ -24,10 +24,10 @@ def main() -> None:
 
 async def async_main() -> None:
     parser = argparse.ArgumentParser(description="Find TikTok leads and store them in SQLite.")
-    parser.add_argument("--niche", help="Niche label, e.g. mom, fitness, lifestyle")
+    parser.add_argument("--niche", help="Niche label, e.g. mom, fitness, lifestyle, grwm")
     parser.add_argument("--handle", action="append", default=[], help="TikTok handle to inspect")
     parser.add_argument("--hashtag", action="append", default=[], help="TikTok hashtag to crawl")
-    parser.add_argument("--limit", type=int, default=30, help="Maximum hashtag videos to inspect")
+    parser.add_argument("--limit", type=int, default=30, help="New (not yet evaluated) creators to inspect per hashtag")
     parser.add_argument("--init-db", action="store_true", help="Only initialize the SQLite schema")
     parser.add_argument("--stats", action="store_true", help="Print pipeline stats and exit")
     parser.add_argument(
@@ -106,7 +106,7 @@ async def async_main() -> None:
             repository.close()
         return
 
-    hashtags = args.hashtag or list(hashtags_for_niche(args.niche))
+    hashtags = args.hashtag or [*hashtags_for_niche(args.niche), *trending_hashtags_for_niche(args.niche)]
     if settings.shuffle_hashtags and not args.hashtag:
         random.shuffle(hashtags)
     if not args.handle and not hashtags:
@@ -178,6 +178,9 @@ def print_stats(repository: LeadRepository) -> None:
         print("\nLeads per day (last 7 days):")
         for day, count in stats["leads_last_7_days"]:
             print(f"  {day}  {count}")
+        week_total = sum(count for _, count in stats["leads_last_7_days"])
+        trending = stats["trending_leads_last_7_days"]
+        print(f"  trending topics: {trending} of {week_total} ({trending / week_total:.0%}, target 25-50%)")
 
     if stats["skip_reasons"]:
         print("\nEvaluation outcomes:")
@@ -218,7 +221,8 @@ def test_proxy(settings: Settings) -> None:
         proxy_protocol = proxy.protocols[0] if proxy.protocols else "http"
         if proxy_protocol not in {"http", "socks5"}:
             raise ValueError(f"Unsupported proxy protocol for {endpoint}: {proxy_protocol}")
-        proxy_url = f"{proxy_protocol}://{auth}{endpoint}"
+        request_protocol = "socks5h" if proxy_protocol == "socks5" else proxy_protocol
+        proxy_url = f"{request_protocol}://{auth}{endpoint}"
         try:
             response = requests.get(
                 "https://ipv4.webshare.io/",

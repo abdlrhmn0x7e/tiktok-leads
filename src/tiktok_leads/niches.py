@@ -1,142 +1,196 @@
 from __future__ import annotations
 
+# Tag lists were pruned on 2026-09-18 using leads-hub review data: for "mom",
+# identity/vlog tags (#momvlog, #sahmlife, #girlmom) were accepted 80-95% of
+# the time while advice/coach tags (#parentingtips, #momcoach, #momtips) fell
+# under 50%. For "lifestyle", routine/wellness creator tags converted at 50-80%
+# while product/home tags (#homedecor, #targetfinds, #wellness) sat at 12-33%.
+#
+# Refreshed on 2026-10-12. TikTok's hashtag feed only serves a few hundred
+# creators before its cursor wraps, so seed tags drain: from 2026-10-09 on,
+# most fitness/mom seeds yielded 0-1 new leads. Tags that still yielded 2+ were
+# kept; drained ones were swapped for tags from discovered_hashtags that
+# qualifying creators use often and that are niche-exclusive (>=85% of
+# volume-normalized mentions in this niche for fitness/mom, >=78% for the
+# fuzzier lifestyle/grwm). Cross-niche tags (#morningroutine, #dayinmylife,
+# #mealprep, #skincareroutine, #fitmom, #ugccreator) were dropped: handles
+# are deduped globally, so a shared tag just makes niches steal each other's
+# creators. #grwm/#getreadywithme stay as the grwm niche's anchor tags.
 NICHE_HASHTAGS: dict[str, tuple[str, ...]] = {
     "fitness": (
         "fitnessjourney",
-        "weightlossjourney",
-        "fitnesstok",
-        "fittok",
-        "fitnesscreator",
         "fitnessinfluencer",
-        "personaltrainer",
-        "gymcoach",
-        "nutritioncoach",
-        "macroscoach",
-        "bodyrecomposition",
-        "musclebuilding",
-        "strengthtraining",
-        "workoutroutine",
-        "homeworkout",
-        "beginnergymworkout",
-        "womensfitness",
-        "fitnesstips",
-        "fitnessadvice",
-        "bodybuildingcoach",
-        "calisthenicscoach",
-        "pilates",
-        "pilatesinstructor",
-        "runningcoach",
-        "mealprep",
-        "nutritiontips",
-        "healthyeating",
-        "highprotein",
-        "macros",
-        "weightliftingcoach",
-        "mobilitycoach",
-        "functionaltraining",
-        "strengthandconditioning",
-        "girlswholift",
-        "womenwholift",
-        "trainersoftiktok",
-        "bodytransformation",
-        "dietitiantok",
-        "sportsnutritionist",
+        "weightlossjourney",
         "gymtok",
-        "fitnessmotivation",
+        "backworkout",
+        "backday",
+        "legworkout",
+        "gluteworkout",
+        "glutegrowth",
+        "absworkout",
+        "abworkout",
+        "armworkout",
+        "biceps",
+        "upperbody",
+        "beginnerworkout",
+        "gymbeginner",
+        "progressiveoverload",
+        "hypertrophy",
+        "weightlifting",
+        "powerlifting",
+        "crossfit",
+        "hyrox",
+        "hybridathlete",
+        "marathontraining",
+        "mobility",
+        "fatloss",
+        "fatlosstips",
+        "weightlosstips",
+        "gymtransformation",
+        "dietitian",
     ),
     "mom": (
         "momtok",
         "momsoftiktok",
-        "momcreator",
-        "mominfluencer",
-        "momblogger",
-        "mompreneur",
-        "momcoach",
         "motherhood",
-        "sahmlife",
-        "workingmom",
-        "newmom",
         "firsttimemom",
         "toddlermom",
         "millennialmom",
-        "gentleparenting",
-        "parentingtips",
-        "parentingcoach",
-        "postpartum",
-        "postpartumjourney",
-        "pregnancytok",
-        "pregnancycoach",
+        "workingmom",
         "parenttok",
-        "momfitness",
-        "fitmom",
         "familycontentcreator",
-        "momvlog",
-        "familyvlog",
-        "babyproducts",
-        "babyproductreview",
-        "amazonmomfinds",
-        "momhacks",
         "toddlerlife",
-        "momlife",
-        "boymom",
-        "girlmom",
-        "newbornmom",
-        "homeschoolmom",
-        "singlemom",
-        "momsupport",
         "momadvice",
-        "momtips",
-        "toddleractivities",
-        "babyledweaning",
-        "breastfeedingmom",
-        "momof2",
-        "momof3",
-        "pregnancyjourney",
+        "momvlog",
+        "boymom",
+        "dayinthelifemom",
+        "newbornlife",
+        "sahm",
+        "stayathomemom",
+        "youngmom",
+        "momsover30",
+        "mumlife",
+        "momlifebelike",
+        "relatablemom",
+        "realisticmomlife",
+        "motherhoodunfiltered",
+        "momcontent",
+        "momhack",
+        "momoftwo",
+        "momof4",
+        "2under2",
+        "homeschool",
+        "parentsoftiktok",
+        "babiesoftiktok",
+        "babytok",
+        "toddlertok",
+        "newbornbaby",
+        "babymusthaves",
+        "pregnanttiktok",
+        "pregnancytiktok",
+        "laboranddelivery",
+        "csection",
+        "postpartumrecovery",
     ),
     "lifestyle": (
         "lifestyleblogger",
-        "lifestylecreator",
         "lifestyleinfluencer",
-        "contentcreator",
-        "ugccommunity",
-        "ugccreator",
-        "microinfluencer",
-        "dayinmylife",
-        "morningroutine",
-        "nightroutine",
-        "selfcare",
-        "selfcaretips",
-        "wellness",
-        "wellnesstok",
-        "wellnesscoach",
-        "wellnesscreator",
+        "lifestylecoach",
         "mindfulness",
         "mindfulnesscoach",
-        "healthyhabits",
-        "productivitytips",
-        "organization",
-        "homeorganization",
-        "homedecor",
-        "amazonfinds",
-        "targetfinds",
-        "productreview",
-        "travelvlog",
-        "travelcreator",
-        "lifestylecoach",
-        "healthcoach",
         "mindsetcoach",
         "holistichealth",
-        "holisticwellness",
         "nontoxicliving",
         "cleanliving",
         "intentionalliving",
-        "slowliving",
         "minimalistlifestyle",
         "personaldevelopment",
-        "growthmindset",
         "habittracking",
-        "dailyroutine",
-        "balancedlifestyle",
+        "routinevlog",
+        "minimalism",
+        "minimalist",
+        "meditation",
+        "lifecoach",
+        "spirituality",
+        "lowtoxliving",
+        "cottagecore",
+    ),
+    "grwm": (
+        "grwm",
+        "getreadywithme",
+        "grwmforwork",
+        "grwmforschool",
+        "grwmchitchat",
+        "chitchatgrwm",
+        "morningmakeup",
+        "ugcbeauty",
+        "beautyugc",
+        "makeupgrwm",
+        "makeuptutorial",
+        "eyeshadowtutorial",
+        "makeuptips",
+        "makeuphack",
+        "makeuplook",
+        "makeupartist",
+        "fullglam",
+        "softglam",
+        "fallmakeup",
+        "halloweenmakeup",
+        "beautycontentcreator",
+    ),
+}
+
+
+# Trending topics the client asked for (2026-10-15): 25-50% of daily outreach
+# should be creators whose content pillars are one of these, the rest general.
+# They live under existing niches so leads keep a label the outreach form
+# accepts; the daemon schedules them at DAEMON_TRENDING_SHARE of each sweep.
+# Each tag sits in exactly one niche, for the same dedupe reason as above.
+TRENDING_HASHTAGS: dict[str, tuple[str, ...]] = {
+    "fitness": (
+        "macrofriendlyswaps",
+        "macrofriendly",
+        "proffee",
+        "proteincoffee",
+        "volumeeating",
+        "caloriedeficithack",
+        "lazyfitness",
+        "aestheticeats",
+        "hiddenmacros",
+        "tinnedfish",
+        "cottagecheese",
+        "cottagecheeserecipes",
+        "highprotein",
+        "proteinintake",
+        "proteinmaxxing",
+        "fibermaxxing",
+        "guthealth",
+        "guttok",
+    ),
+    "lifestyle": (
+        "mushroomcoffee",
+        "habitstacking",
+        "healthyhabits",
+        "holistichealing",
+        "holisticwellness",
+        "hormonehealth",
+        "wellnesstrends",
+    ),
+}
+
+TRENDING_SEARCH_TERMS: dict[str, tuple[str, ...]] = {
+    "fitness": (
+        "high protein recipes",
+        "macro friendly recipes",
+        "volume eating",
+        "protein coffee",
+        "gut health",
+    ),
+    "lifestyle": (
+        "holistic health coach",
+        "hormone health",
+        "habit stacking",
+        "wellness trends 2027",
     ),
 }
 
@@ -179,12 +233,23 @@ NICHE_SEARCH_TERMS: dict[str, tuple[str, ...]] = {
         "mindfulness coach",
         "product review creator",
     ),
+    "grwm": (
+        "grwm",
+        "get ready with me",
+        "beauty creator",
+        "beauty influencer",
+        "makeup content creator",
+        "skincare creator",
+        "ugc beauty creator",
+    ),
 }
 
 
 # Engagement-bait tags every creator stamps on every video. Harvesting these
 # would crawl the generic For You firehose and fill the niche with unrelated
 # accounts (this is how a monkey account ended up tagged "mom").
+# Seed tags in NICHE_HASHTAGS bypass this list, so the "grwm" niche still
+# crawls #grwm while other niches never harvest it.
 GENERIC_HASHTAGS: frozenset[str] = frozenset(
     {
         "fyp",
@@ -268,3 +333,19 @@ def hashtags_for_niche(niche: str) -> tuple[str, ...]:
 
 def search_terms_for_niche(niche: str) -> tuple[str, ...]:
     return NICHE_SEARCH_TERMS.get(niche.strip().lower(), ())
+
+
+def trending_hashtags_for_niche(niche: str) -> tuple[str, ...]:
+    return TRENDING_HASHTAGS.get(niche.strip().lower(), ())
+
+
+def trending_search_terms_for_niche(niche: str) -> tuple[str, ...]:
+    return TRENDING_SEARCH_TERMS.get(niche.strip().lower(), ())
+
+
+def trending_found_via() -> set[str]:
+    """scraped_profiles.found_via values that mean "found through a trending
+    topic", for measuring the trending share of leads."""
+    tags = {f"#{tag}" for tags in TRENDING_HASHTAGS.values() for tag in tags}
+    terms = {f"search:{term}" for terms in TRENDING_SEARCH_TERMS.values() for term in terms}
+    return tags | terms

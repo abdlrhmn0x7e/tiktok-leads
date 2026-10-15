@@ -75,6 +75,7 @@ class ConvexNotifier(Notifier):
                 "followers_count": lead.followers_count,
                 "average_views": lead.average_views,
                 "source": lead.source,
+                "found_via": lead.found_via,
                 "scraped_at": lead.created_at.isoformat(),
             },
             headers={"Authorization": f"Bearer {self.api_key}"},

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterable, Iterable, Sized
+from dataclasses import replace
 
 from tiktok_leads.db import LeadRepository
 from tiktok_leads.filters import evaluate_candidate
@@ -148,7 +149,7 @@ async def _process_candidates(
             logger.info("skipped @%s: %s", candidate.handle or "unknown", evaluation.skip_reason)
             continue
 
-        lead = evaluation.lead
+        lead = replace(evaluation.lead, found_via=found_via)
         if repository.exists_by_email(lead.email):
             logger.info("skipped @%s: email already exists (%s)", lead.handle, lead.email)
             continue
