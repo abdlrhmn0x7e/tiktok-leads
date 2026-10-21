@@ -7,9 +7,12 @@ import time
 from dataclasses import dataclass
 from datetime import date
 
+import requests
+
 from tiktok_leads.db import LeadRepository
 from tiktok_leads.factory import build_source
 from tiktok_leads.niches import (
+    SEARCH_NICHE,
     hashtags_for_niche,
     search_terms_for_niche,
     trending_hashtags_for_niche,
@@ -81,6 +84,10 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
             for term in search_terms_for_niche(niche):
                 add(WorkItem("search", niche, term))
 
+    # Run regardless of discovery_search: these are terms someone asked for.
+    for term in _fetch_search_terms(settings):
+        add(WorkItem("search", SEARCH_NICHE, term))
+
     if settings.recheck_enabled:
         for handle, handle_niche in repository.handles_due_for_recheck(
             after_days=settings.recheck_after_days,
@@ -91,6 +98,24 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
     items.extend(_trending_slots(trending, general_count=len(items), share=settings.daemon_trending_share))
     random.shuffle(items)
     return items
+
+
+def _fetch_search_terms(settings: Settings) -> list[str]:
+    """Search terms managed in leads-hub. A Convex outage must not stall the
+    sweep, so failures log and yield none."""
+    if not settings.convex_site_url or not settings.convex_ingest_api_key:
+        return []
+    try:
+        response = requests.get(
+            f"{settings.convex_site_url.rstrip('/')}/scraper/search-terms",
+            headers={"Authorization": f"Bearer {settings.convex_ingest_api_key}"},
+            timeout=20,
+        )
+        response.raise_for_status()
+        return [str(term) for term in response.json()["terms"]]
+    except Exception:
+        logger.exception("daemon: failed to fetch search terms from Convex; skipping them this sweep")
+        return []
 
 
 def _trending_slots(trending: list[WorkItem], *, general_count: int, share: float) -> list[WorkItem]:
