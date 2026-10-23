@@ -705,13 +705,19 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
     async def _collect_recent_videos(self, user: Any) -> tuple[list[int], set[str]]:
         views: list[int] = []
         hashtags: set[str] = set()
-        async for video in user.videos(count=self.recent_video_count):
+        # +3 covers TikTok's max pinned videos; the library ignores count inside a page anyway.
+        async for video in user.videos(count=self.recent_video_count + 3):
             video_data = video.as_dict
+            hashtags.update(self._extract_hashtags(video_data))
+            # Pinned videos are usually old viral hits and would inflate the average.
+            if self._get(video_data, "isPinnedItem", default=False):
+                continue
             video_stats = self._get(video_data, "stats", default={})
             play_count = self._parse_int(self._get(video_stats, "playCount", "play_count", default=None))
             if play_count is not None:
                 views.append(play_count)
-            hashtags.update(self._extract_hashtags(video_data))
+            if len(views) >= self.recent_video_count:
+                break
         return views, hashtags
 
     async def _delay(self) -> None:

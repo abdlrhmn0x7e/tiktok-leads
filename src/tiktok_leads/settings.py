@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     scrape_burst_size: int = 1
     scrape_rest_seconds: float = 7_200.0
     scrape_rest_jitter_seconds: float = 1_800.0
-    scrape_recent_video_count: int = 6
+    scrape_recent_video_count: int = 12
     discovery_search: bool = False
 
     # TikTok session settings.
@@ -46,7 +46,6 @@ class Settings(BaseSettings):
     tiktok_suppress_resource_types: str = "image,media,font,stylesheet"
 
     # Lower-level compatibility knobs. Prefer the SCRAPE_* settings above.
-    recent_video_count: int = 12
     tiktok_request_delay_seconds: float = 2.0
     tiktok_request_jitter_seconds: float = 1.5
     tiktok_skip_videos_without_email: bool = True

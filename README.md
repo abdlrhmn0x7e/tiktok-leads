@@ -44,7 +44,7 @@ SCRAPE_PROFILE_JITTER_SECONDS=4    # random extra wait between creators
 SCRAPE_BURST_SIZE=1                # work items per daemon cycle
 SCRAPE_REST_SECONDS=7200           # 2h rest between daemon cycles
 SCRAPE_REST_JITTER_SECONDS=1800    # up to +30m extra rest
-SCRAPE_RECENT_VIDEO_COUNT=6        # videos checked only for email-bearing profiles
+SCRAPE_RECENT_VIDEO_COUNT=12       # videos checked only for email-bearing profiles
 DISCOVERY_SEARCH=false             # TikTok search is useful but often block-prone
 ```
 
