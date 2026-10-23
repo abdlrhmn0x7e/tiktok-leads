@@ -85,8 +85,8 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
                 add(WorkItem("search", niche, term))
 
     # Run regardless of discovery_search: these are terms someone asked for.
-    for term in _fetch_search_terms(settings):
-        add(WorkItem("search", SEARCH_NICHE, term))
+    for term, term_niche in _fetch_search_terms(settings):
+        add(WorkItem("search", term_niche, term))
 
     if settings.recheck_enabled:
         for handle, handle_niche in repository.handles_due_for_recheck(
@@ -100,9 +100,9 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
     return items
 
 
-def _fetch_search_terms(settings: Settings) -> list[str]:
-    """Search terms managed in leads-hub. A Convex outage must not stall the
-    sweep, so failures log and yield none."""
+def _fetch_search_terms(settings: Settings) -> list[tuple[str, str]]:
+    """(term, niche) pairs managed in leads-hub. A Convex outage must not stall
+    the sweep, so failures log and yield none."""
     if not settings.convex_site_url or not settings.convex_ingest_api_key:
         return []
     try:
@@ -112,7 +112,13 @@ def _fetch_search_terms(settings: Settings) -> list[str]:
             timeout=20,
         )
         response.raise_for_status()
-        return [str(term) for term in response.json()["terms"]]
+        # shortcut: bare strings are the pre-niche response shape, drop once leads-hub is deployed.
+        return [
+            (str(item["term"]), str(item.get("niche") or SEARCH_NICHE))
+            if isinstance(item, dict)
+            else (str(item), SEARCH_NICHE)
+            for item in response.json()["terms"]
+        ]
     except Exception:
         logger.exception("daemon: failed to fetch search terms from Convex; skipping them this sweep")
         return []
