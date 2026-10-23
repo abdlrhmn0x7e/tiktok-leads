@@ -5,6 +5,7 @@
 # Usage:
 #   ./run.sh                # defaults to the "fitness" niche
 #   ./run.sh fitness,mom    # comma-separated niches
+#   ./run.sh search --no-crawl-video-hashtags   # extra args go to tiktok-leads
 #
 # Each run also:
 #   - tees daemon output to logs/daemon-YYYY-MM-DD.log
@@ -17,6 +18,7 @@ set -u
 cd "$(dirname "$0")"
 
 NICHES="${1:-fitness}"
+[ $# -gt 0 ] && shift
 RESTART_DELAY="${RESTART_DELAY:-60}"
 # New (unevaluated) creators to inspect per hashtag visit.
 LIMIT="${LIMIT:-150}"
@@ -47,7 +49,7 @@ while true; do
   TODAY="$(date '+%Y-%m-%d')"
   backup_database "${TODAY}"
   echo "[run.sh] $(date '+%Y-%m-%d %H:%M:%S') starting daemon for niches=${NICHES} (log: logs/daemon-${TODAY}.log)"
-  ${KEEP_AWAKE} uv run tiktok-leads --daemon --niche "${NICHES}" --limit "${LIMIT}" 2>&1 | tee -a "logs/daemon-${TODAY}.log" || true
+  ${KEEP_AWAKE} uv run tiktok-leads --daemon --niche "${NICHES}" --limit "${LIMIT}" "$@" 2>&1 | tee -a "logs/daemon-${TODAY}.log" || true
   echo "[run.sh] $(date '+%Y-%m-%d %H:%M:%S') daemon exited; restarting in ${RESTART_DELAY}s"
   sleep "${RESTART_DELAY}"
 done
