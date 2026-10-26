@@ -13,6 +13,11 @@ class Notifier:
     def send_text(self, text: str) -> None:
         raise NotImplementedError
 
+    def send_found_via(self, lead: Lead) -> None:
+        """An existing lead turned up again via lead.found_via. Only Convex
+        keeps a lead's sources, so other channels ignore it."""
+        return None
+
 
 class NoopNotifier(Notifier):
     def send(self, lead: Lead) -> None:
@@ -88,6 +93,10 @@ class ConvexNotifier(Notifier):
         # Digests/status messages stay on chat channels; Convex only gets leads.
         return None
 
+    def send_found_via(self, lead: Lead) -> None:
+        # The ingest appends found_via to a lead it already has.
+        self.send(lead)
+
 
 class MultiNotifier(Notifier):
     def __init__(self, notifiers: list[Notifier]) -> None:
@@ -98,6 +107,9 @@ class MultiNotifier(Notifier):
 
     def send_text(self, text: str) -> None:
         self._fan_out(lambda notifier: notifier.send_text(text))
+
+    def send_found_via(self, lead: Lead) -> None:
+        self._fan_out(lambda notifier: notifier.send_found_via(lead))
 
     def _fan_out(self, action) -> None:
         errors: list[str] = []

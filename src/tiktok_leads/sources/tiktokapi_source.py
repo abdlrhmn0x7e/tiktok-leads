@@ -221,6 +221,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         exclude_handles: set[str] | None = None,
         start_cursor: int = 0,
         on_cursor: Callable[[int], None] | None = None,
+        on_known: Callable[[str], None] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         api = self._api()
         tag = hashtag.removeprefix("#").strip()
@@ -244,6 +245,8 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     continue
                 if normalized_handle in excluded:
                     logger.info("skipping @%s from #%s: handle already evaluated", handle, tag)
+                    if on_known is not None:
+                        on_known(normalized_handle)
                     continue
                 seen_handles.add(normalized_handle)
                 inspected.value += 1
@@ -286,6 +289,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         niche: str,
         limit: int,
         exclude_handles: set[str] | None = None,
+        on_known: Callable[[str], None] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         api = self._api()
         excluded = {handle.removeprefix("@").lower() for handle in exclude_handles or set()}
@@ -301,6 +305,8 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     continue
                 if normalized_handle in excluded:
                     logger.info("skipping @%s from search '%s': handle already evaluated", handle, query)
+                    if on_known is not None:
+                        on_known(normalized_handle)
                     continue
                 seen_handles.add(normalized_handle)
 

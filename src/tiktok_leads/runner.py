@@ -68,6 +68,7 @@ async def scrape_hashtag(
             exclude_handles=exclude_handles,
             start_cursor=start_cursor,
             on_cursor=on_cursor,
+            on_known=lambda handle: _add_lead_source(repository, notifier, handle, f"#{tag}"),
         ),
         repository,
         notifier,
@@ -96,6 +97,7 @@ async def scrape_search(
             niche=niche,
             limit=limit,
             exclude_handles=exclude_handles,
+            on_known=lambda handle: _add_lead_source(repository, notifier, handle, f"search:{query}"),
         ),
         repository,
         notifier,
@@ -103,6 +105,22 @@ async def scrape_search(
         min_average_views=min_average_views,
         found_via=f"search:{query}",
     )
+
+
+def _add_lead_source(repository: LeadRepository, notifier: Notifier, handle: str, found_via: str) -> None:
+    """An already-evaluated creator turned up again. If they're a lead and
+    this source is new for them, add it to their found_via in Convex; a
+    failed push stays queued for the daemon's retry."""
+    lead = repository.add_lead_source(handle, found_via)
+    if lead is None:
+        return
+    try:
+        notifier.send_found_via(lead)
+    except Exception:
+        logger.exception("failed to send source %s for @%s", found_via, lead.handle)
+        return
+    repository.mark_lead_source_notified(lead.email, found_via)
+    logger.info("added source %s to @%s", found_via, lead.handle)
 
 
 async def _process_candidates(

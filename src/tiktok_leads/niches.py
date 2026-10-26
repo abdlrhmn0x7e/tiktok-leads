@@ -195,9 +195,9 @@ TRENDING_SEARCH_TERMS: dict[str, tuple[str, ...]] = {
 }
 
 
-# Niche label for leads from the search terms managed in leads-hub (fetched
-# each sweep from Convex): their own category, outside fitness/mom/lifestyle.
-# Must match SEARCH_NICHE in leads-hub's convex/searchTerms.ts.
+# Fallback niche for leads-hub search terms (fetched each sweep from Convex)
+# that have no niche of their own. Must match SEARCH_NICHE in leads-hub's
+# convex/searchTerms.ts.
 SEARCH_NICHE = "search"
 
 

@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS discovered_hashtags (
 
 CREATE INDEX IF NOT EXISTS idx_discovered_hashtags_niche ON discovered_hashtags(niche);
 
+-- Every hashtag/search a lead was found through, so a creator surfacing
+-- again via a new one gets it appended to their found_via in Convex.
+CREATE TABLE IF NOT EXISTS lead_sources (
+    email TEXT NOT NULL,
+    found_via TEXT NOT NULL,
+    notified_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (email, found_via)
+);
+
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -76,7 +86,20 @@ class LeadRepository:
         self._migrate_add_scraped_profiles_skip_reason()
         self._migrate_add_scraped_profiles_found_via()
         self._backfill_scraped_profiles_from_influencers()
+        self._backfill_lead_sources()
         self.connection.commit()
+
+    def _backfill_lead_sources(self) -> None:
+        # Each lead's original source already reached Convex with the lead.
+        self.connection.execute(
+            """
+            INSERT OR IGNORE INTO lead_sources (email, found_via, notified_at)
+            SELECT i.email, sp.found_via, CURRENT_TIMESTAMP
+            FROM influencers i
+            JOIN scraped_profiles sp ON sp.handle = lower(replace(i.handle, '@', ''))
+            WHERE sp.found_via IS NOT NULL
+            """
+        )
 
     def _migrate_add_scraped_profiles_found_via(self) -> None:
         columns = {
@@ -355,6 +378,45 @@ class LeadRepository:
             for row in rows
         ]
 
+    def add_lead_source(self, handle: str, found_via: str) -> Lead | None:
+        """Record that a creator turned up via found_via. Returns their lead,
+        carrying that found_via, when they are a lead and the source is new."""
+        row = self.connection.execute(
+            f"SELECT {_LEAD_COLUMNS} FROM influencers i "
+            "WHERE lower(replace(i.handle, '@', '')) = ? LIMIT 1",
+            (handle.removeprefix("@").lower(),),
+        ).fetchone()
+        if row is None:
+            return None
+        cursor = self.connection.execute(
+            "INSERT OR IGNORE INTO lead_sources (email, found_via) VALUES (?, ?)",
+            (row["email"], found_via),
+        )
+        self.connection.commit()
+        return _lead_from_row(row, found_via) if cursor.rowcount else None
+
+    def unnotified_lead_sources(self, limit: int = 20) -> list[Lead]:
+        """Added sources whose push to Convex failed (oldest first)."""
+        rows = self.connection.execute(
+            f"""
+            SELECT {_LEAD_COLUMNS}, ls.found_via
+            FROM lead_sources ls
+            JOIN influencers i ON i.email = ls.email
+            WHERE ls.notified_at IS NULL
+            ORDER BY ls.created_at ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [_lead_from_row(row, str(row["found_via"])) for row in rows]
+
+    def mark_lead_source_notified(self, email: str, found_via: str) -> None:
+        self.connection.execute(
+            "UPDATE lead_sources SET notified_at = CURRENT_TIMESTAMP WHERE email = ? AND found_via = ?",
+            (email, found_via),
+        )
+        self.connection.commit()
+
     def mark_notified(self, email: str) -> None:
         self.connection.execute(
             "UPDATE influencers SET notified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE email = ?",
@@ -447,3 +509,21 @@ class LeadRepository:
 
     def close(self) -> None:
         self.connection.close()
+
+
+_LEAD_COLUMNS = (
+    "i.handle, i.profile_url, i.niche, i.email, i.followers_count, i.average_views, i.source"
+)
+
+
+def _lead_from_row(row: sqlite3.Row, found_via: str) -> Lead:
+    return Lead(
+        handle=str(row["handle"]),
+        profile_url=str(row["profile_url"]),
+        niche=str(row["niche"]),
+        email=str(row["email"]),
+        followers_count=int(row["followers_count"]),
+        average_views=int(row["average_views"]),
+        source=str(row["source"]),
+        found_via=found_via,
+    )

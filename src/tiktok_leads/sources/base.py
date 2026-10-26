@@ -26,6 +26,7 @@ class TikTokSource(ABC):
         exclude_handles: set[str] | None = None,
         start_cursor: int = 0,
         on_cursor: Callable[[int], None] | None = None,
+        on_known: Callable[[str], None] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         raise NotImplementedError
 
@@ -37,5 +38,6 @@ class TikTokSource(ABC):
         niche: str,
         limit: int,
         exclude_handles: set[str] | None = None,
+        on_known: Callable[[str], None] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         raise NotImplementedError
