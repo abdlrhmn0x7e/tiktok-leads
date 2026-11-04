@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 from tiktok_leads.models import Lead
@@ -378,9 +379,10 @@ class LeadRepository:
             for row in rows
         ]
 
-    def add_lead_source(self, handle: str, found_via: str) -> Lead | None:
-        """Record that a creator turned up via found_via. Returns their lead,
-        carrying that found_via, when they are a lead and the source is new."""
+    def add_lead_source(self, handle: str, found_via: str, *, niche: str | None = None) -> Lead | None:
+        """Record that a creator turned up via found_via, moving them to `niche`
+        when given. Returns their lead, carrying that found_via, when they are a
+        lead and the source or niche is new, so the change still needs pushing."""
         row = self.connection.execute(
             f"SELECT {_LEAD_COLUMNS} FROM influencers i "
             "WHERE lower(replace(i.handle, '@', '')) = ? LIMIT 1",
@@ -388,12 +390,27 @@ class LeadRepository:
         ).fetchone()
         if row is None:
             return None
+        niche_changed = niche is not None and niche != row["niche"]
+        if niche_changed:
+            self.connection.execute(
+                "UPDATE influencers SET niche = ?, updated_at = CURRENT_TIMESTAMP WHERE email = ?",
+                (niche, row["email"]),
+            )
         cursor = self.connection.execute(
             "INSERT OR IGNORE INTO lead_sources (email, found_via) VALUES (?, ?)",
             (row["email"], found_via),
         )
+        if niche_changed and not cursor.rowcount:
+            # Known source, new niche: re-queue it so the daemon's retry pushes the niche too.
+            self.connection.execute(
+                "UPDATE lead_sources SET notified_at = NULL WHERE email = ? AND found_via = ?",
+                (row["email"], found_via),
+            )
         self.connection.commit()
-        return _lead_from_row(row, found_via) if cursor.rowcount else None
+        if not (niche_changed or cursor.rowcount):
+            return None
+        lead = _lead_from_row(row, found_via)
+        return replace(lead, niche=niche) if niche_changed else lead
 
     def unnotified_lead_sources(self, limit: int = 20) -> list[Lead]:
         """Added sources whose push to Convex failed (oldest first)."""

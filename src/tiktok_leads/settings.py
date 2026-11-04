@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # leads-hub Convex ingest (NOTIFICATION_CHANNEL=convex).
     convex_site_url: str | None = None  # e.g. https://<deployment>.convex.site
     convex_ingest_api_key: str | None = None
+    apify_token: str | None = None  # tiktok-leads-apify discovery runs
 
     # Primary scraping controls.
     scrape_mode: Literal["polite", "balanced", "aggressive"] = "polite"

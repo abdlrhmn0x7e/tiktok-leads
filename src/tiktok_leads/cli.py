@@ -36,6 +36,12 @@ async def async_main() -> None:
         help="Run forever: scrape a slice of hashtags each cycle and survive blocks. "
         "Accepts comma-separated niches, e.g. --niche fitness,mom",
     )
+    parser.add_argument(
+        "--search-terms-only",
+        action="store_true",
+        help="Daemon mode that runs only the search terms (and their niches) from leads-hub; "
+        "no hashtags, built-in searches, or re-checks. --niche is ignored",
+    )
     parser.add_argument("--test-notification", action="store_true", help="Send a fake lead notification and exit")
     parser.add_argument("--test-proxy", action="store_true", help="Test configured proxy connectivity and exit")
     parser.add_argument("--log-level", default="INFO", help="Logging level: DEBUG, INFO, WARNING, ERROR")
@@ -55,7 +61,9 @@ async def async_main() -> None:
     )
     args = parser.parse_args()
     configure_logging(args.log_level)
-    if not args.niche and not (args.stats or args.init_db or args.test_proxy or args.test_notification):
+    if not args.niche and not (
+        args.stats or args.init_db or args.test_proxy or args.test_notification or args.search_terms_only
+    ):
         parser.error("--niche is required unless using --stats, --init-db, --test-proxy, or --test-notification")
 
     settings = Settings()
@@ -97,8 +105,13 @@ async def async_main() -> None:
         repository.close()
         return
 
-    if args.daemon:
-        niches = [n.strip() for n in args.niche.split(",") if n.strip()]
+    if args.daemon or args.search_terms_only:
+        if args.search_terms_only:
+            # No niches and no re-checks leaves _build_queue with only the leads-hub terms.
+            niches = []
+            settings.recheck_enabled = False
+        else:
+            niches = [n.strip() for n in args.niche.split(",") if n.strip()]
         notifier = build_notifier(settings)
         try:
             await run_daemon(settings, repository, notifier, niches=niches, limit=args.limit)

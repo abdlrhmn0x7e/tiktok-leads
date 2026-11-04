@@ -140,6 +140,31 @@ uv run tiktok-leads --niche fitness --limit 30
 
 By default, the scraper requires at least 10,000 followers and 10,000 average views across recent videos.
 
+## Apify discovery
+
+`tiktok-leads-apify` runs the leads-hub search terms as Apify TikTok video
+searches, keeps creators who are new to the database, have 10k-250k followers,
+and whose matching video has 15k+ views, then verifies each one with the
+regular scraper (bio, bio-link email, recent-video average). Leads land in
+Convex with `source=apify` and `found_via=search:<term>`.
+
+```env
+APIFY_TOKEN=apify_api_...
+```
+
+```bash
+uv run tiktok-leads-apify --dry-run                    # Apify input and cost cap, spends nothing
+uv run tiktok-leads-apify                              # discover, save results to data/apify/, verify
+uv run tiktok-leads-apify --discover-only              # spend Apify budget now, verify later
+uv run tiktok-leads-apify --items-file data/apify/search-<stamp>.json   # verify saved results
+```
+
+Every filter is a flag (`--help` lists them with defaults): `--results-per-term`,
+`--sort`, `--date-range`, `--min-video-views`, `--min-followers`,
+`--max-followers`, `--max-charge-usd`, and `--term` to run specific terms.
+Creators already evaluated are skipped, so after a TikTok block re-run with
+`--items-file` to continue without paying Apify again.
+
 ## Run once and forget (daemon mode)
 
 The commands above do a single pass and exit. Daemon mode runs forever instead:

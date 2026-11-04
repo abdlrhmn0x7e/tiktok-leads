@@ -6,6 +6,7 @@
 #   ./run.sh                # defaults to the "fitness" niche
 #   ./run.sh fitness,mom    # comma-separated niches
 #   ./run.sh search --no-crawl-video-hashtags   # extra args go to tiktok-leads
+#   ./run.sh search --search-terms-only         # only the leads-hub search terms
 #
 # Each run also:
 #   - tees daemon output to logs/daemon-YYYY-MM-DD.log

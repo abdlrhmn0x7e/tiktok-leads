@@ -85,7 +85,7 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
                 add(WorkItem("search", niche, term))
 
     # Run regardless of discovery_search: these are terms someone asked for.
-    for term, niche in _fetch_search_terms(settings):
+    for term, niche in fetch_search_terms(settings):
         add(WorkItem("search", niche, term))
 
     if settings.recheck_enabled:
@@ -100,7 +100,7 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
     return items
 
 
-def _fetch_search_terms(settings: Settings) -> list[tuple[str, str]]:
+def fetch_search_terms(settings: Settings) -> list[tuple[str, str]]:
     """(term, niche) pairs managed in leads-hub. A Convex outage must not
     stall the sweep, so failures log and yield none."""
     if not settings.convex_site_url or not settings.convex_ingest_api_key:

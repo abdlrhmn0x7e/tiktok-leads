@@ -24,11 +24,15 @@ async def scrape_handles(
     min_followers: int,
     min_average_views: int,
     found_via: str = "handle",
+    source_label: str | None = None,
 ) -> int:
     handle_count = len(handles) if isinstance(handles, Sized) else "provided"
     logger.info("checking %s handle(s) for niche=%s", handle_count, niche)
+    candidates = source.profiles_from_handles(handles, niche=niche)
+    if source_label:
+        candidates = (replace(candidate, source=source_label) async for candidate in candidates)
     return await _process_candidates(
-        source.profiles_from_handles(handles, niche=niche),
+        candidates,
         repository,
         notifier,
         min_followers=min_followers,
@@ -97,7 +101,9 @@ async def scrape_search(
             niche=niche,
             limit=limit,
             exclude_handles=exclude_handles,
-            on_known=lambda handle: _add_lead_source(repository, notifier, handle, f"search:{query}"),
+            on_known=lambda handle: _add_lead_source(
+                repository, notifier, handle, f"search:{query}", niche=niche
+            ),
         ),
         repository,
         notifier,
@@ -107,11 +113,18 @@ async def scrape_search(
     )
 
 
-def _add_lead_source(repository: LeadRepository, notifier: Notifier, handle: str, found_via: str) -> None:
+def _add_lead_source(
+    repository: LeadRepository,
+    notifier: Notifier,
+    handle: str,
+    found_via: str,
+    *,
+    niche: str | None = None,
+) -> None:
     """An already-evaluated creator turned up again. If they're a lead and
-    this source is new for them, add it to their found_via in Convex; a
-    failed push stays queued for the daemon's retry."""
-    lead = repository.add_lead_source(handle, found_via)
+    this source is new for them (or `niche` corrects theirs), push it to
+    Convex; a failed push stays queued for the daemon's retry."""
+    lead = repository.add_lead_source(handle, found_via, niche=niche)
     if lead is None:
         return
     try:
@@ -120,7 +133,7 @@ def _add_lead_source(repository: LeadRepository, notifier: Notifier, handle: str
         logger.exception("failed to send source %s for @%s", found_via, lead.handle)
         return
     repository.mark_lead_source_notified(lead.email, found_via)
-    logger.info("added source %s to @%s", found_via, lead.handle)
+    logger.info("added source %s to @%s (niche=%s)", found_via, lead.handle, lead.niche)
 
 
 async def _process_candidates(
