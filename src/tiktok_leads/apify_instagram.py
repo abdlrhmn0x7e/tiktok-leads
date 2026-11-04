@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlsplit
@@ -35,6 +36,8 @@ SEARCH_ACTOR = "apify~instagram-hashtag-scraper"
 PROFILE_ACTOR = "apify~instagram-profile-scraper"
 REEL_ACTOR = "apify~instagram-reel-scraper"
 SOURCE_LABEL = "apify"
+# shortcut: the search actor's free-plan price per result; paid tiers are cheaper, so this overestimates there.
+SEARCH_RESULT_USD = 0.0026
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,18 @@ class ReelHit:
 
 def search_input(terms: list[str], *, results_per_term: int) -> dict:
     return {"hashtags": terms, "keywordSearch": True, "resultsType": "reels", "resultsLimit": results_per_term}
+
+
+def search_cursor(term: str) -> str:
+    return f"instagram-search:{term}"
+
+
+def next_search(depths: dict[str, int], step: int) -> tuple[list[str], int]:
+    """The actor has no offset, so going past the results a term already returned means
+    asking for more and paying for the repeats. One run takes one resultsLimit, so only
+    the shallowest terms go deeper each run."""
+    shallowest = min(depths.values())
+    return [term for term, depth in depths.items() if depth == shallowest], shallowest + step
 
 
 def term_of(item: dict) -> str:
@@ -115,34 +130,44 @@ class Budget:
 
 
 def run_instagram(settings: Settings, args: argparse.Namespace, term_niches: dict[str, str]) -> int:
-    results_per_term = args.results_per_term or 10
-    terms = list(term_niches)
-    if args.dry_run:
-        print(json.dumps(search_input(terms, results_per_term=results_per_term), indent=2))
-        print(
-            f"{len(terms)} terms, up to {len(terms) * results_per_term} reels, then profiles and "
-            f"{args.reels_per_creator} reels per surviving creator, all capped at ${args.max_charge_usd:.2f}"
-        )
-        return 0
-    if not settings.apify_token and not (args.items_file and args.discover_only):
+    if not settings.apify_token and not (args.dry_run or (args.items_file and args.discover_only)):
         print("Set APIFY_TOKEN in .env")
         return 1
     budget = Budget(settings.apify_token or "", args.max_charge_usd)
-
-    if args.items_file:
-        items = json.loads(args.items_file.read_text())
-    else:
-        items = budget.run(
-            SEARCH_ACTOR, search_input(terms, results_per_term=results_per_term), max_items=len(terms) * results_per_term
-        )
-        out = settings.database_path.parent / "apify" / f"instagram-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.json"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(items))
-        print(f"Saved {len(items)} Instagram reels to {out}")
-
     repository = LeadRepository(settings.database_path)
     repository.initialize()
     try:
+        if args.items_file and not args.dry_run:
+            items = json.loads(args.items_file.read_text())
+        else:
+            depths = {
+                term: repository.get_feed_cursor(search_cursor(term), max_age_days=settings.feed_cursor_max_age_days)
+                for term in term_niches
+            }
+            terms, depth = next_search(depths, args.results_per_term or 10)
+            # Half the budget goes to the search so profiles and reels can still run; the
+            # terms left out are still the shallowest next run, so they rotate in.
+            terms = terms[: max(1, int(args.max_charge_usd / 2 / (depth * SEARCH_RESULT_USD)))]
+            print(
+                f"Searching {len(terms)} of {len(depths)} terms {depth} reels deep "
+                f"(up to ${depth * len(terms) * SEARCH_RESULT_USD:.2f} of ${args.max_charge_usd:.2f})"
+            )
+            if args.dry_run:
+                print(json.dumps(search_input(terms, results_per_term=depth), indent=2))
+                return 0
+            items = budget.run(SEARCH_ACTOR, search_input(terms, results_per_term=depth), max_items=len(terms) * depth)
+            out = settings.database_path.parent / "apify" / f"instagram-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.json"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(items))
+            print(f"Saved {len(items)} Instagram reels to {out}")
+            reels = Counter(term_of(item) for item in items if item.get("id"))
+            capped = budget.remaining <= 0.01
+            if capped:
+                print("Search stopped at --max-charge-usd; terms it didn't finish stay at their old depth")
+            for term in terms:
+                # Short of depth means the term ran out of reels, unless the budget cut the run off.
+                if reels[term] >= depth or not capped:
+                    repository.set_feed_cursor(search_cursor(term), depth)
         hits = pick_reel_hits(
             items,
             term_niches=term_niches,
@@ -238,5 +263,5 @@ def verify_instagram(
         except Exception:
             logger.exception("failed to send @%s; the daemon's retry will push it", lead.handle)
         else:
-            repository.mark_notified(lead.email)
+            repository.mark_notified(lead.email, lead.platform)
     return inserted

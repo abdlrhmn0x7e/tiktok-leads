@@ -173,10 +173,23 @@ stage only pays for creators that survived the previous one:
 the `instagram_profiles` table so later runs skip them, and leads reach Convex
 with `platform=instagram`.
 
+The usual run, repeated whenever you want more leads:
+
 ```bash
-uv run tiktok-leads-apify --platform instagram --dry-run
-uv run tiktok-leads-apify --platform instagram
-uv run tiktok-leads-apify --platform instagram --items-file data/apify/instagram-<stamp>.json
+uv run tiktok-leads-apify --platform instagram --max-charge-usd 0.5
+```
+
+Each run picks up where the last stopped. Apify can't skip results, so a term
+goes deeper by asking for 10 more reels than last time and paying for the
+repeats too. Every run deepens only the least-searched terms, as many as half
+of `--max-charge-usd` pays for, and leaves the other half for profiles and
+reels. New terms start first. Depths live in `feed_cursors` and reset to the
+top results after 14 days without a search. A run cut off by the budget only
+moves the terms that finished.
+
+```bash
+uv run tiktok-leads-apify --platform instagram --max-charge-usd 0.5 --dry-run   # what the next run searches
+uv run tiktok-leads-apify --platform instagram --items-file data/apify/instagram-<stamp>.json   # re-check saved results free
 ```
 
 Every filter is a flag (`--help` lists them with defaults): `--results-per-term`,

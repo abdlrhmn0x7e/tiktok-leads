@@ -150,8 +150,8 @@ def parse_args(settings: Settings) -> argparse.Namespace:
     parser.add_argument(
         "--results-per-term",
         type=int,
-        help="Apify search results per term (default: 30 for tiktok, 10 for instagram, which also pays "
-        "for each creator's profile and reels)",
+        help="Apify search results per term (default: 30 for tiktok). Instagram: how much deeper each run "
+        "searches, picking up where the last run stopped (default: 10)",
     )
     parser.add_argument(
         "--reels-per-creator",

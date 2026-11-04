@@ -15,13 +15,16 @@ CREATE TABLE IF NOT EXISTS influencers (
     platform TEXT NOT NULL DEFAULT 'tiktok',
     profile_url TEXT NOT NULL,
     niche TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL,
     followers_count INTEGER NOT NULL,
     average_views INTEGER NOT NULL,
     source TEXT NOT NULL,
     notified_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- exists_by_email keeps one lead per email. Per platform here only because a
+    -- few emails got a TikTok and an Instagram lead while that was allowed.
+    UNIQUE (email, platform)
 );
 
 CREATE INDEX IF NOT EXISTS idx_influencers_niche ON influencers(niche);
@@ -96,6 +99,7 @@ class LeadRepository:
     def initialize(self) -> None:
         self.connection.executescript(SCHEMA)
         self._migrate_add_influencers_platform()
+        self._migrate_influencers_email_unique_per_platform()
         self._migrate_scraped_profiles_handle_unique()
         self._migrate_add_scraped_profiles_skip_reason()
         self._migrate_add_scraped_profiles_found_via()
@@ -109,6 +113,29 @@ class LeadRepository:
             self.connection.execute(
                 "ALTER TABLE influencers ADD COLUMN platform TEXT NOT NULL DEFAULT 'tiktok'"
             )
+
+    def _migrate_influencers_email_unique_per_platform(self) -> None:
+        table = self.connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'influencers'"
+        ).fetchone()
+        if "email TEXT NOT NULL UNIQUE" not in str(table["sql"]):
+            return
+        columns = (
+            "id, handle, platform, profile_url, niche, email, followers_count, "
+            "average_views, source, notified_at, created_at, updated_at"
+        )
+        # The renamed table keeps the index names, so SCHEMA runs again after the drop to rebuild them.
+        self.connection.executescript(
+            f"""
+            BEGIN;
+            ALTER TABLE influencers RENAME TO influencers_old;
+            {SCHEMA}
+            INSERT INTO influencers ({columns}) SELECT {columns} FROM influencers_old;
+            DROP TABLE influencers_old;
+            {SCHEMA}
+            COMMIT;
+            """
+        )
 
     def _backfill_lead_sources(self) -> None:
         # Each lead's original source already reached Convex with the lead.
@@ -427,7 +454,7 @@ class LeadRepository:
         niche_changed = niche is not None and niche != row["niche"]
         if niche_changed:
             self.connection.execute(
-                "UPDATE influencers SET niche = ?, updated_at = CURRENT_TIMESTAMP WHERE email = ?",
+                "UPDATE influencers SET niche = ?, updated_at = CURRENT_TIMESTAMP WHERE email = ? AND platform = 'tiktok'",
                 (niche, row["email"]),
             )
         cursor = self.connection.execute(
@@ -452,7 +479,7 @@ class LeadRepository:
             f"""
             SELECT {_LEAD_COLUMNS}, ls.found_via
             FROM lead_sources ls
-            JOIN influencers i ON i.email = ls.email
+            JOIN influencers i ON i.email = ls.email AND i.platform = 'tiktok'
             WHERE ls.notified_at IS NULL
             ORDER BY ls.created_at ASC
             LIMIT ?
@@ -468,10 +495,11 @@ class LeadRepository:
         )
         self.connection.commit()
 
-    def mark_notified(self, email: str) -> None:
+    def mark_notified(self, email: str, platform: str) -> None:
         self.connection.execute(
-            "UPDATE influencers SET notified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE email = ?",
-            (email,),
+            "UPDATE influencers SET notified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+            "WHERE email = ? AND platform = ?",
+            (email, platform),
         )
         self.connection.commit()
 

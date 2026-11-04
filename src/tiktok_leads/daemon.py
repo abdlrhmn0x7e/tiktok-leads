@@ -292,7 +292,7 @@ def _retry_unnotified(repository: LeadRepository, notifier: Notifier) -> None:
             # The channel is probably down; the next cycle will retry.
             logger.exception("daemon: failed to re-send notification for @%s", lead.handle)
             return
-        repository.mark_notified(lead.email)
+        repository.mark_notified(lead.email, lead.platform)
         logger.info("daemon: sent pending notification for @%s", lead.handle)
     for lead in repository.unnotified_lead_sources():
         try:
