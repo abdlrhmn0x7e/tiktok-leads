@@ -74,6 +74,7 @@ class ConvexNotifier(Notifier):
             f"{self.ingest_url}/ingest/leads",
             json={
                 "handle": lead.handle,
+                "platform": lead.platform,
                 "profile_url": lead.profile_url,
                 "email": lead.email,
                 "niche": lead.niche,
@@ -167,7 +168,7 @@ def build_notifier(settings: Settings) -> Notifier:
 def format_lead_message(lead: Lead) -> str:
     return "\n".join(
         [
-            "New TikTok influencer found",
+            f"New {platform_name(lead)} influencer found",
             "",
             f"Handle: `{format_handle(lead.handle)}`",
             f"Niche: `{lead.niche}`",
@@ -183,7 +184,7 @@ def format_discord_payload(lead: Lead) -> dict:
     return {
         "content": "\n".join(
             [
-                "**New TikTok influencer found**",
+                f"**New {platform_name(lead)} influencer found**",
                 "",
                 f"Niche: `{lead.niche}`",
                 f"Followers: `{lead.followers_count:,}`",
@@ -210,13 +211,17 @@ def format_discord_payload(lead: Lead) -> dict:
                     {
                         "type": 2,
                         "style": 5,
-                        "label": "Open TikTok",
+                        "label": f"Open {platform_name(lead)}",
                         "url": lead.profile_url,
                     }
                 ],
             }
         ],
     }
+
+
+def platform_name(lead: Lead) -> str:
+    return "Instagram" if lead.platform == "instagram" else "TikTok"
 
 
 def format_handle(handle: str) -> str:

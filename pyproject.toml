@@ -18,6 +18,7 @@ dependencies = [
 tiktok-leads = "tiktok_leads.cli:main"
 tiktok-leads-upload = "tiktok_leads.upload:main"
 tiktok-leads-apify = "tiktok_leads.apify_discovery:main"
+tiktok-leads-apify-experiment = "tiktok_leads.apify_experiment:main"
 
 [build-system]
 requires = ["uv_build>=0.11.17,<0.12.0"]

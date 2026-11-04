@@ -10,6 +10,7 @@ way a daemon find does.
     uv run tiktok-leads-apify                     # discover with Apify, then verify
     uv run tiktok-leads-apify --discover-only     # only spend Apify budget, save results
     uv run tiktok-leads-apify --items-file data/apify/search-....json   # verify saved results
+    uv run tiktok-leads-apify --platform instagram   # Instagram, all stages via Apify (apify_instagram.py)
 
 Already-evaluated creators are skipped, so re-running with --items-file after a
 TikTok block continues where it stopped without paying Apify again.
@@ -25,8 +26,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-import requests
-
+from tiktok_leads.apify_client import run_actor
+from tiktok_leads.apify_instagram import run_instagram
 from tiktok_leads.cli import configure_logging
 from tiktok_leads.daemon import fetch_search_terms
 from tiktok_leads.db import LeadRepository
@@ -38,7 +39,6 @@ from tiktok_leads.sources.tiktokapi_source import TikTokBlockedError
 
 logger = logging.getLogger(__name__)
 
-APIFY_API = "https://api.apify.com/v2"
 ACTOR = "clockworks~tiktok-scraper"
 SORTS = {"most-liked": "MOST_LIKED", "most-relevant": "MOST_RELEVANT", "latest": "LATEST"}
 DATE_RANGES = {
@@ -61,46 +61,14 @@ class Candidate:
     top_video_views: int
 
 
-def actor_input(terms: list[str], args: argparse.Namespace) -> dict:
+def actor_input(terms: list[str], *, results_per_term: int, sort: str, date_range: str) -> dict:
     return {
         "searchQueries": terms,
         "searchSection": "/video",
-        "resultsPerPage": args.results_per_term,
-        "videoSearchSorting": SORTS[args.sort],
-        "videoSearchDateFilter": DATE_RANGES[args.date_range],
+        "resultsPerPage": results_per_term,
+        "videoSearchSorting": SORTS[sort],
+        "videoSearchDateFilter": DATE_RANGES[date_range],
     }
-
-
-def run_actor(token: str, payload: dict, *, max_items: int, max_charge_usd: float) -> list[dict]:
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.post(
-        f"{APIFY_API}/acts/{ACTOR}/runs",
-        params={"maxItems": max_items, "maxTotalChargeUsd": max_charge_usd, "waitForFinish": 60},
-        headers=headers,
-        json=payload,
-        timeout=90,
-    )
-    response.raise_for_status()
-    run = response.json()["data"]
-    logger.info("apify run %s started (dataset %s)", run["id"], run["defaultDatasetId"])
-    while run["status"] in {"READY", "RUNNING", "TIMING-OUT", "ABORTING"}:
-        response = requests.get(
-            f"{APIFY_API}/actor-runs/{run['id']}", params={"waitForFinish": 60}, headers=headers, timeout=90
-        )
-        response.raise_for_status()
-        run = response.json()["data"]
-        logger.info("apify run %s: %s", run["id"], run["status"])
-    # A run stopped by the charge cap still has a usable partial dataset.
-    if run["status"] not in {"SUCCEEDED", "ABORTED", "TIMED-OUT"}:
-        raise RuntimeError(f"Apify run {run['id']} ended with status {run['status']}")
-    response = requests.get(
-        f"{APIFY_API}/datasets/{run['defaultDatasetId']}/items",
-        params={"clean": "true", "format": "json"},
-        headers=headers,
-        timeout=120,
-    )
-    response.raise_for_status()
-    return response.json()
 
 
 def pick_candidates(
@@ -173,24 +141,52 @@ def parse_args(settings: Settings) -> argparse.Namespace:
     )
     parser.add_argument("--niche", default="fitness", help="Niche for --term terms (default: fitness)")
     parser.add_argument(
-        "--results-per-term", type=int, default=30, help="Apify video results per term (default: 30)"
+        "--platform",
+        choices=["tiktok", "instagram"],
+        default="tiktok",
+        help="tiktok: video search, verified free by the scraper. instagram: reel search, profiles and "
+        "recent reels all through Apify (default: tiktok)",
+    )
+    parser.add_argument(
+        "--results-per-term",
+        type=int,
+        help="Apify search results per term (default: 30 for tiktok, 10 for instagram, which also pays "
+        "for each creator's profile and reels)",
+    )
+    parser.add_argument(
+        "--reels-per-creator",
+        type=int,
+        default=6,
+        help="Instagram only: recent reels fetched to average a creator's views (default: 6)",
     )
     parser.add_argument(
         "--sort",
         choices=SORTS,
         default="most-liked",
-        help="Video search order (default: most-liked; a 2026-11 sample found it gave 3x the usable "
+        help="TikTok only. Video search order (default: most-liked; a 2026-11 sample found it gave 3x the usable "
         "new creators of latest)",
     )
     parser.add_argument(
-        "--date-range", choices=DATE_RANGES, default="all-time", help="Video upload window (default: all-time)"
+        "--date-range",
+        choices=DATE_RANGES,
+        default="all-time",
+        help="TikTok only. Video upload window (default: all-time)",
     )
     parser.add_argument(
         "--max-charge-usd",
         type=float,
         default=4.5,
-        help="Hard cap Apify stops the run at (default: 4.5; the free plan allows $5/month)",
+        help="Hard cap on Apify spend for the whole run (default: 4.5; the free plan allows $5/month)",
     )
+    add_filter_args(parser, settings)
+    parser.add_argument("--items-file", type=Path, help="Verify saved Apify results instead of running Apify")
+    parser.add_argument("--discover-only", action="store_true", help="Run Apify and save results, skip verification")
+    parser.add_argument("--dry-run", action="store_true", help="Print the Apify input and exit without spending")
+    parser.add_argument("--log-level", default="INFO", help="Logging level: DEBUG, INFO, WARNING, ERROR")
+    return parser.parse_args()
+
+
+def add_filter_args(parser: argparse.ArgumentParser, settings: Settings) -> None:
     parser.add_argument(
         "--min-video-views",
         type=int,
@@ -209,11 +205,6 @@ def parse_args(settings: Settings) -> argparse.Namespace:
         default=250_000,
         help="Follower ceiling; bigger creators are usually already pitched (default: 250000)",
     )
-    parser.add_argument("--items-file", type=Path, help="Verify saved Apify results instead of running Apify")
-    parser.add_argument("--discover-only", action="store_true", help="Run Apify and save results, skip verification")
-    parser.add_argument("--dry-run", action="store_true", help="Print the Apify input and exit without spending")
-    parser.add_argument("--log-level", default="INFO", help="Logging level: DEBUG, INFO, WARNING, ERROR")
-    return parser.parse_args()
 
 
 def main() -> int:
@@ -227,12 +218,17 @@ def main() -> int:
     if not term_niches and not args.items_file:
         print("No search terms: pass --term or set CONVEX_SITE_URL and CONVEX_INGEST_API_KEY.")
         return 1
+    if args.platform == "instagram":
+        return run_instagram(settings, args, term_niches)
+    args.results_per_term = args.results_per_term or 30
 
     if args.items_file:
         items = json.loads(args.items_file.read_text())
     else:
         terms = list(term_niches)
-        payload = actor_input(terms, args)
+        payload = actor_input(
+            terms, results_per_term=args.results_per_term, sort=args.sort, date_range=args.date_range
+        )
         max_items = len(terms) * args.results_per_term
         if args.dry_run:
             print(json.dumps(payload, indent=2))
@@ -241,7 +237,10 @@ def main() -> int:
         if not settings.apify_token:
             print("Set APIFY_TOKEN in .env")
             return 1
-        items = run_actor(settings.apify_token, payload, max_items=max_items, max_charge_usd=args.max_charge_usd)
+        items, cost = run_actor(
+            settings.apify_token, payload, actor=ACTOR, max_items=max_items, max_charge_usd=args.max_charge_usd
+        )
+        logger.info("apify run cost $%.2f", cost)
         out = settings.database_path.parent / "apify" / f"search-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(items))

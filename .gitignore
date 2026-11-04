@@ -21,6 +21,7 @@ wheels/
 data/*.sqlite
 data/*.sqlite-*
 data/backups/
+data/apify/
 
 # Logs and runtime output
 *.log

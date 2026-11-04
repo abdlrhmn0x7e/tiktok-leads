@@ -159,11 +159,44 @@ uv run tiktok-leads-apify --discover-only              # spend Apify budget now,
 uv run tiktok-leads-apify --items-file data/apify/search-<stamp>.json   # verify saved results
 ```
 
+### Instagram
+
+`--platform instagram` runs the same terms as Instagram reel keyword searches.
+Instagram has no free scraper here, so every stage goes through Apify, and each
+stage only pays for creators that survived the previous one:
+
+1. Reel search (`--results-per-term`, default 10): new creators whose reel has 15k+ views.
+2. Profile lookup: 10k-250k followers, an email in the bio or bio link, and an email that isn't already a lead.
+3. Recent reels (`--reels-per-creator`, default 6): robust average of at least `MIN_AVERAGE_VIEWS`.
+
+`--max-charge-usd` caps the three runs together. Evaluated creators go into
+the `instagram_profiles` table so later runs skip them, and leads reach Convex
+with `platform=instagram`.
+
+```bash
+uv run tiktok-leads-apify --platform instagram --dry-run
+uv run tiktok-leads-apify --platform instagram
+uv run tiktok-leads-apify --platform instagram --items-file data/apify/instagram-<stamp>.json
+```
+
 Every filter is a flag (`--help` lists them with defaults): `--results-per-term`,
 `--sort`, `--date-range`, `--min-video-views`, `--min-followers`,
 `--max-followers`, `--max-charge-usd`, and `--term` to run specific terms.
 Creators already evaluated are skipped, so after a TikTok block re-run with
 `--items-file` to continue without paying Apify again.
+
+Before spending the budget, compare configurations on small samples:
+
+```bash
+uv run tiktok-leads-apify-experiment --dry-run
+uv run tiktok-leads-apify-experiment --config most-liked:all-time --config latest:past-month \
+    --term "high protein" --term "hevy code" --sample-size 12
+```
+
+Each sample is one term under one `SORT:DATE_RANGE`. New creators that pass the
+filters are looked up read-only (nothing reaches SQLite or Convex), and
+`data/apify/experiments/<stamp>/report.md` lists results per qualified lead for
+every sample plus each candidate's caption, bio, and recent hashtags.
 
 ## Run once and forget (daemon mode)
 

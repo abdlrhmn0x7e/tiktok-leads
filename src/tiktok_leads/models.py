@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Literal
 
 from tiktok_leads.numbers import robust_average_view_count
 
@@ -26,6 +27,9 @@ class CandidateProfile:
         return robust_average_view_count(self.recent_video_views)
 
 
+Platform = Literal["tiktok", "instagram"]
+
+
 @dataclass(frozen=True)
 class Lead:
     handle: str
@@ -36,4 +40,5 @@ class Lead:
     average_views: int
     source: str
     found_via: str | None = None  # "#tag" or "search:term" that surfaced the creator
+    platform: Platform = "tiktok"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

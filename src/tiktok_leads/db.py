@@ -12,6 +12,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS influencers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     handle TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT 'tiktok',
     profile_url TEXT NOT NULL,
     niche TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
@@ -37,6 +38,17 @@ CREATE TABLE IF NOT EXISTS scraped_profiles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_scraped_profiles_niche ON scraped_profiles(niche);
+
+-- Instagram creators already evaluated, kept apart from scraped_profiles so
+-- the same handle on both platforms is checked once per platform.
+CREATE TABLE IF NOT EXISTS instagram_profiles (
+    handle TEXT PRIMARY KEY,
+    niche TEXT NOT NULL,
+    skip_reason TEXT,
+    found_via TEXT,
+    last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS feed_cursors (
     feed TEXT PRIMARY KEY,
@@ -83,12 +95,20 @@ class LeadRepository:
 
     def initialize(self) -> None:
         self.connection.executescript(SCHEMA)
+        self._migrate_add_influencers_platform()
         self._migrate_scraped_profiles_handle_unique()
         self._migrate_add_scraped_profiles_skip_reason()
         self._migrate_add_scraped_profiles_found_via()
         self._backfill_scraped_profiles_from_influencers()
         self._backfill_lead_sources()
         self.connection.commit()
+
+    def _migrate_add_influencers_platform(self) -> None:
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(influencers)")}
+        if "platform" not in columns:
+            self.connection.execute(
+                "ALTER TABLE influencers ADD COLUMN platform TEXT NOT NULL DEFAULT 'tiktok'"
+            )
 
     def _backfill_lead_sources(self) -> None:
         # Each lead's original source already reached Convex with the lead.
@@ -98,7 +118,7 @@ class LeadRepository:
             SELECT i.email, sp.found_via, CURRENT_TIMESTAMP
             FROM influencers i
             JOIN scraped_profiles sp ON sp.handle = lower(replace(i.handle, '@', ''))
-            WHERE sp.found_via IS NOT NULL
+            WHERE sp.found_via IS NOT NULL AND i.platform = 'tiktok'
             """
         )
 
@@ -132,7 +152,8 @@ class LeadRepository:
 
     def seen_handles(self) -> set[str]:
         rows = self.connection.execute(
-            "SELECT handle FROM scraped_profiles UNION SELECT handle FROM influencers",
+            "SELECT handle FROM scraped_profiles "
+            "UNION SELECT handle FROM influencers WHERE platform = 'tiktok'",
         ).fetchall()
         return {str(row["handle"]).removeprefix("@").lower() for row in rows}
 
@@ -161,13 +182,37 @@ class LeadRepository:
         )
         self.connection.commit()
 
+    def seen_instagram_handles(self) -> set[str]:
+        rows = self.connection.execute(
+            "SELECT handle FROM instagram_profiles "
+            "UNION SELECT lower(replace(handle, '@', '')) FROM influencers WHERE platform = 'instagram'"
+        ).fetchall()
+        return {str(row[0]) for row in rows}
+
+    def record_instagram_profile(
+        self, *, handle: str, niche: str, skip_reason: str | None, found_via: str | None
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO instagram_profiles (handle, niche, skip_reason, found_via, last_seen_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(handle) DO UPDATE SET
+                niche = excluded.niche,
+                skip_reason = excluded.skip_reason,
+                found_via = excluded.found_via,
+                last_seen_at = CURRENT_TIMESTAMP
+            """,
+            (handle.removeprefix("@").lower(), niche, skip_reason, found_via),
+        )
+        self.connection.commit()
+
     def excluded_handles(self, recheck_after_days: int) -> set[str]:
         """Handles to skip on crawls: confirmed leads, plus anything evaluated
         within the recheck window. Stale non-leads fall out so they can be
         re-evaluated when a feed surfaces them again."""
         rows = self.connection.execute(
             """
-            SELECT handle FROM influencers
+            SELECT handle FROM influencers WHERE platform = 'tiktok'
             UNION
             SELECT handle FROM scraped_profiles
             WHERE last_seen_at >= datetime('now', ?)
@@ -190,7 +235,8 @@ class LeadRepository:
             f"""
             SELECT sp.handle AS handle, sp.niche AS niche
             FROM scraped_profiles sp
-            LEFT JOIN influencers i ON lower(replace(i.handle, '@', '')) = sp.handle
+            LEFT JOIN influencers i
+              ON lower(replace(i.handle, '@', '')) = sp.handle AND i.platform = 'tiktok'
             WHERE i.handle IS NULL
               AND sp.skip_reason IN ({placeholders})
               AND sp.last_seen_at < datetime('now', ?)
@@ -329,13 +375,14 @@ class LeadRepository:
             self.connection.execute(
                 """
                 INSERT INTO influencers (
-                    handle, profile_url, niche, email, followers_count,
+                    handle, platform, profile_url, niche, email, followers_count,
                     average_views, source, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     lead.handle,
+                    lead.platform,
                     lead.profile_url,
                     lead.niche,
                     lead.email,
@@ -354,30 +401,17 @@ class LeadRepository:
     def unnotified_leads(self, limit: int = 20) -> list[Lead]:
         """Leads whose notification failed at insert time (oldest first)."""
         rows = self.connection.execute(
-            """
-            SELECT i.handle, i.profile_url, i.niche, i.email, i.followers_count,
-                   i.average_views, i.source, sp.found_via
+            f"""
+            SELECT {_LEAD_COLUMNS}, coalesce(sp.found_via, ip.found_via) AS found_via
             FROM influencers i
-            LEFT JOIN scraped_profiles sp ON sp.handle = lower(replace(i.handle, '@', ''))
+            {_FOUND_VIA_JOINS}
             WHERE i.notified_at IS NULL
             ORDER BY i.created_at ASC
             LIMIT ?
             """,
             (limit,),
         ).fetchall()
-        return [
-            Lead(
-                handle=str(row["handle"]),
-                profile_url=str(row["profile_url"]),
-                niche=str(row["niche"]),
-                email=str(row["email"]),
-                followers_count=int(row["followers_count"]),
-                average_views=int(row["average_views"]),
-                source=str(row["source"]),
-                found_via=row["found_via"],
-            )
-            for row in rows
-        ]
+        return [_lead_from_row(row, row["found_via"]) for row in rows]
 
     def add_lead_source(self, handle: str, found_via: str, *, niche: str | None = None) -> Lead | None:
         """Record that a creator turned up via found_via, moving them to `niche`
@@ -385,7 +419,7 @@ class LeadRepository:
         lead and the source or niche is new, so the change still needs pushing."""
         row = self.connection.execute(
             f"SELECT {_LEAD_COLUMNS} FROM influencers i "
-            "WHERE lower(replace(i.handle, '@', '')) = ? LIMIT 1",
+            "WHERE lower(replace(i.handle, '@', '')) = ? AND i.platform = 'tiktok' LIMIT 1",
             (handle.removeprefix("@").lower(),),
         ).fetchone()
         if row is None:
@@ -529,13 +563,22 @@ class LeadRepository:
 
 
 _LEAD_COLUMNS = (
-    "i.handle, i.profile_url, i.niche, i.email, i.followers_count, i.average_views, i.source"
+    "i.handle, i.platform, i.profile_url, i.niche, i.email, i.followers_count, i.average_views, i.source"
 )
 
+# found_via lives in each platform's evaluated-profiles table.
+_FOUND_VIA_JOINS = """
+    LEFT JOIN scraped_profiles sp
+      ON i.platform = 'tiktok' AND sp.handle = lower(replace(i.handle, '@', ''))
+    LEFT JOIN instagram_profiles ip
+      ON i.platform = 'instagram' AND ip.handle = lower(replace(i.handle, '@', ''))
+"""
 
-def _lead_from_row(row: sqlite3.Row, found_via: str) -> Lead:
+
+def _lead_from_row(row: sqlite3.Row, found_via: str | None) -> Lead:
     return Lead(
         handle=str(row["handle"]),
+        platform=row["platform"],
         profile_url=str(row["profile_url"]),
         niche=str(row["niche"]),
         email=str(row["email"]),

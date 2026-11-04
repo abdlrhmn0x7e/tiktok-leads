@@ -20,16 +20,19 @@ from pathlib import Path
 
 import requests
 
+from tiktok_leads.db import LeadRepository
 from tiktok_leads.settings import Settings
 
 BATCH_SIZE = 100
 
 QUERY = """
-SELECT i.handle, i.profile_url, i.niche, i.email, i.followers_count,
-       i.average_views, i.source, i.created_at, sp.found_via
+SELECT i.handle, i.platform, i.profile_url, i.niche, i.email, i.followers_count,
+       i.average_views, i.source, i.created_at, coalesce(sp.found_via, ip.found_via) AS found_via
 FROM influencers i
 LEFT JOIN scraped_profiles sp
-  ON sp.handle = lower(replace(i.handle, '@', ''))
+  ON i.platform = 'tiktok' AND sp.handle = lower(replace(i.handle, '@', ''))
+LEFT JOIN instagram_profiles ip
+  ON i.platform = 'instagram' AND ip.handle = lower(replace(i.handle, '@', ''))
 ORDER BY i.id ASC
 """
 
@@ -60,6 +63,7 @@ def read_leads(database_path: Path) -> list[dict]:
     return [
         {
             "handle": row["handle"],
+            "platform": row["platform"],
             "profile_url": row["profile_url"],
             "email": row["email"],
             "niche": row["niche"],
@@ -129,6 +133,9 @@ def main() -> int:
         print(f"Database not found: {args.database}", file=sys.stderr)
         return 1
 
+    repository = LeadRepository(args.database)  # applies schema migrations the query needs
+    repository.initialize()
+    repository.close()
     leads = read_leads(args.database)
     print(f"Read {len(leads)} leads from {args.database}")
     if not leads:
