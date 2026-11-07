@@ -225,7 +225,10 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         start_cursor: int = 0,
         on_cursor: Callable[[int], None] | None = None,
         on_known: Callable[[str], None] | None = None,
+        on_finished: Callable[[int], None] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
+        """`on_finished` gets the number of not-yet-evaluated creators the
+        crawl found, and only when the feed ran without a feed error."""
         api = self._api()
         tag = hashtag.removeprefix("#").strip()
         excluded = {handle.removeprefix("@").lower() for handle in exclude_handles or set()}
@@ -273,6 +276,8 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                         blocked = True
                         raise TikTokBlockedError(f"sustained TikTok blocking on #{tag}")
                 await self._delay()
+            if on_finished is not None:
+                on_finished(len(seen_handles))
         except TikTokBlockedError:
             raise
         except Exception as error:

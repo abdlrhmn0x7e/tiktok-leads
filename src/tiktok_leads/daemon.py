@@ -22,11 +22,11 @@ from tiktok_leads.niches import (
 )
 from tiktok_leads.notifiers import Notifier
 from tiktok_leads.runner import (
-    SEARCH_EXHAUSTED_DAYS,
+    EXHAUSTED_DAYS,
+    is_exhausted,
     scrape_handles,
     scrape_hashtag,
     scrape_search,
-    search_exhausted,
 )
 from tiktok_leads.settings import Settings
 from tiktok_leads.sources import TikTokApiSource
@@ -117,16 +117,18 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
 
     exhausted = {
         item for item in [*items, *trending]
-        if item.kind == "search" and search_exhausted(repository, item.value)
+        if item.kind in EXHAUSTED_DAYS and is_exhausted(repository, item.kind, item.value)
     }
-    if exhausted:
-        logger.info(
-            "daemon: skipping %s search(es) that found no new creators in the last %s days",
-            len(exhausted),
-            SEARCH_EXHAUSTED_DAYS,
-        )
-        items = [item for item in items if item not in exhausted]
-        trending = [item for item in trending if item not in exhausted]
+    logger.info(
+        "daemon: skipping %s hashtag(s) and %s search(es) that found no new creators "
+        "in their last crawl (rest %s and %s days)",
+        sum(item.kind == "hashtag" for item in exhausted),
+        sum(item.kind == "search" for item in exhausted),
+        EXHAUSTED_DAYS["hashtag"],
+        EXHAUSTED_DAYS["search"],
+    )
+    items = [item for item in items if item not in exhausted]
+    trending = [item for item in trending if item not in exhausted]
 
     items.extend(_trending_slots(trending, general_count=len(items), share=settings.daemon_trending_share))
     random.shuffle(items)

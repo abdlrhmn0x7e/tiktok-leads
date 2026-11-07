@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterable, Iterable, Sized
+from collections.abc import AsyncIterable, Callable, Iterable, Sized
 from dataclasses import replace
 
 from tiktok_leads.db import LeadRepository
@@ -13,9 +13,10 @@ from tiktok_leads.sources.base import TikTokSource
 
 logger = logging.getLogger(__name__)
 
-# User-search always starts at cursor 0, so a term whose last run surfaced no
-# new creators returns the same evaluated users again; it rests this long.
-SEARCH_EXHAUSTED_DAYS = 7
+# User-search always starts at cursor 0, and a hashtag feed serves only a few
+# hundred videos before wrapping to its head, so a crawl that surfaced no new
+# creators would return the same evaluated users again; it rests this long.
+EXHAUSTED_DAYS = {"search": 7, "hashtag": 2}
 
 
 async def scrape_handles(
@@ -77,6 +78,7 @@ async def scrape_hashtag(
             start_cursor=start_cursor,
             on_cursor=on_cursor,
             on_known=lambda handle: _add_lead_source(repository, notifier, handle, f"#{tag}"),
+            on_finished=_mark_exhausted(repository, "hashtag", tag),
         ),
         repository,
         notifier,
@@ -108,9 +110,7 @@ async def scrape_search(
             on_known=lambda handle: _add_lead_source(
                 repository, notifier, handle, f"search:{query}", niche=niche
             ),
-            on_finished=lambda new_creators: repository.set_feed_cursor(
-                _search_exhausted_key(query), 0 if new_creators else 1
-            ),
+            on_finished=_mark_exhausted(repository, "search", query),
         ),
         repository,
         notifier,
@@ -120,15 +120,21 @@ async def scrape_search(
     )
 
 
-def search_exhausted(repository: LeadRepository, query: str) -> bool:
+def is_exhausted(repository: LeadRepository, kind: str, value: str) -> bool:
     return (
-        repository.get_feed_cursor(_search_exhausted_key(query), max_age_days=SEARCH_EXHAUSTED_DAYS)
+        repository.get_feed_cursor(_exhausted_key(kind, value), max_age_days=EXHAUSTED_DAYS[kind])
         == 1
     )
 
 
-def _search_exhausted_key(query: str) -> str:
-    return f"search-exhausted:{query.strip().lower()}"
+def _mark_exhausted(repository: LeadRepository, kind: str, value: str) -> Callable[[int], None]:
+    return lambda new_creators: repository.set_feed_cursor(
+        _exhausted_key(kind, value), 0 if new_creators else 1
+    )
+
+
+def _exhausted_key(kind: str, value: str) -> str:
+    return f"{kind}-exhausted:{value.strip().lower()}"
 
 
 def _add_lead_source(
