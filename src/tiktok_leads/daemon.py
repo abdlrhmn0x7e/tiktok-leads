@@ -91,6 +91,8 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
             ]
             harvestable = [tag for tag in due if is_harvestable_hashtag(tag, niche)]
             skipped_hashtags += len(due) - len(harvestable)
+            # Seed tags are already queued; capping before dropping them left 4 of 15 slots for new tags.
+            harvestable = [tag for tag in harvestable if ("hashtag", niche, tag.lower()) not in seen]
             for tag in harvestable[: settings.discovery_harvested_hashtags_per_niche]:
                 add(WorkItem("hashtag", niche, tag, harvested=True))
         if settings.effective_discovery_search:

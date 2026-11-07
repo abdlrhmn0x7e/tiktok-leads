@@ -81,7 +81,7 @@ class Settings(BaseSettings):
 
     # Discovery expansion (lead-volume features).
     discovery_use_harvested_hashtags: bool = True  # crawl hashtags found in scraped videos
-    discovery_harvested_hashtags_per_niche: int = 15  # cap added per sweep
+    discovery_harvested_hashtags_per_niche: int = 60  # cap added per sweep; harvested tags out-yield drained seeds ~40x
     discovery_harvested_min_mentions: int = 2  # only crawl tags seen at least this often
     discovery_harvested_recrawl_after_days: int = 7  # don't re-crawl a harvested tag sooner
     discovery_use_search: bool = True  # crawl api.search.users for niche phrases
