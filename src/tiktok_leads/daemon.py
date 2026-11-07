@@ -20,7 +20,13 @@ from tiktok_leads.niches import (
     trending_search_terms_for_niche,
 )
 from tiktok_leads.notifiers import Notifier
-from tiktok_leads.runner import scrape_handles, scrape_hashtag, scrape_search
+from tiktok_leads.runner import (
+    SEARCH_EXHAUSTED_DAYS,
+    scrape_handles,
+    scrape_hashtag,
+    scrape_search,
+    search_exhausted,
+)
 from tiktok_leads.settings import Settings
 from tiktok_leads.sources import TikTokApiSource
 from tiktok_leads.sources.tiktokapi_source import TikTokBlockedError
@@ -94,6 +100,19 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
             limit=settings.recheck_handles_per_sweep,
         ):
             add(WorkItem("recheck", handle_niche, handle))
+
+    exhausted = {
+        item for item in [*items, *trending]
+        if item.kind == "search" and search_exhausted(repository, item.value)
+    }
+    if exhausted:
+        logger.info(
+            "daemon: skipping %s search(es) that found no new creators in the last %s days",
+            len(exhausted),
+            SEARCH_EXHAUSTED_DAYS,
+        )
+        items = [item for item in items if item not in exhausted]
+        trending = [item for item in trending if item not in exhausted]
 
     items.extend(_trending_slots(trending, general_count=len(items), share=settings.daemon_trending_share))
     random.shuffle(items)

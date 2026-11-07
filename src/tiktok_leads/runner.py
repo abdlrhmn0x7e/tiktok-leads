@@ -13,6 +13,10 @@ from tiktok_leads.sources.base import TikTokSource
 
 logger = logging.getLogger(__name__)
 
+# User-search always starts at cursor 0, so a term whose last run surfaced no
+# new creators returns the same evaluated users again; it rests this long.
+SEARCH_EXHAUSTED_DAYS = 7
+
 
 async def scrape_handles(
     source: TikTokSource,
@@ -104,6 +108,9 @@ async def scrape_search(
             on_known=lambda handle: _add_lead_source(
                 repository, notifier, handle, f"search:{query}", niche=niche
             ),
+            on_finished=lambda new_creators: repository.set_feed_cursor(
+                _search_exhausted_key(query), 0 if new_creators else 1
+            ),
         ),
         repository,
         notifier,
@@ -111,6 +118,17 @@ async def scrape_search(
         min_average_views=min_average_views,
         found_via=f"search:{query}",
     )
+
+
+def search_exhausted(repository: LeadRepository, query: str) -> bool:
+    return (
+        repository.get_feed_cursor(_search_exhausted_key(query), max_age_days=SEARCH_EXHAUSTED_DAYS)
+        == 1
+    )
+
+
+def _search_exhausted_key(query: str) -> str:
+    return f"search-exhausted:{query.strip().lower()}"
 
 
 def _add_lead_source(
