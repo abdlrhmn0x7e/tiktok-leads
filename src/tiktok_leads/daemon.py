@@ -230,7 +230,9 @@ async def run_daemon(
                     source = build_source(settings)
                     await source.__aenter__()
                     source_opened_at = time.monotonic()
+                requests_before = source.request_count
                 inserted = await _run_batch(source, settings, repository, notifier, batch, limit)
+                requests = source.request_count - requests_before
             except TikTokBlockedError as error:
                 await close_source()
                 queue.extend(batch)
@@ -256,11 +258,12 @@ async def run_daemon(
                 continue
 
             block_backoff = settings.daemon_block_backoff_initial_seconds
-            cycle_sleep = settings.effective_rest_seconds + random.uniform(
-                0, settings.effective_rest_jitter_seconds
-            )
+            cycle_sleep = _cycle_rest_seconds(settings, requests=requests, limit=limit)
             logger.info(
-                "daemon: cycle done (%s new lead(s)); sleeping %.0fmin", inserted, cycle_sleep / 60
+                "daemon: cycle done (%s new lead(s), %s TikTok request(s)); sleeping %s",
+                inserted,
+                requests,
+                f"{cycle_sleep:.0f}s" if cycle_sleep < 60 else f"{cycle_sleep / 60:.0f}min",
             )
             await asyncio.sleep(cycle_sleep)
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -268,6 +271,15 @@ async def run_daemon(
         raise
     finally:
         await close_source()
+
+
+def _cycle_rest_seconds(settings: Settings, *, requests: int, limit: int) -> float:
+    """The rest paces TikTok requests, so a cycle that made few (its handles
+    were already evaluated) rests in proportion; full rest from a full cycle's
+    worth of requests up."""
+    full = settings.effective_rest_seconds + random.uniform(0, settings.effective_rest_jitter_seconds)
+    reference = max(1, settings.effective_burst_size * limit)
+    return full * min(1.0, requests / reference)
 
 
 def _maybe_send_digest(repository: LeadRepository, notifier: Notifier) -> None:

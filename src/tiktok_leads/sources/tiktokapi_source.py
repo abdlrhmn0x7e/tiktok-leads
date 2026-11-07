@@ -113,6 +113,9 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         self.bio_link_max_fetches = bio_link_max_fetches
         self.api: TikTokApi | None = None
         self._feed_block_streak = 0
+        # TikTok requests made over this source's life; the daemon paces its
+        # rest by how many a cycle made.
+        self.request_count = 0
 
     async def __aenter__(self) -> "TikTokApiSource":
         await self._start_session()
@@ -385,10 +388,12 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         limit) so a fully-seen feed can't page forever."""
         challenge = api.hashtag(name=tag)
         if getattr(challenge, "id", None) is None:
+            self.request_count += 1
             await challenge.info()
         found = 0
         raw_cap = limit * MAX_FEED_ITEMS_PER_NEW_CANDIDATE
         while (inspected.value if inspected is not None else found) < limit and found < raw_cap:
+            self.request_count += 1
             resp = await api.make_request(
                 url="https://www.tiktok.com/api/challenge/item_list/",
                 params={"challengeID": challenge.id, "count": 30, "cursor": cursor},
@@ -433,6 +438,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             }
             if search_id:
                 params["search_id"] = search_id
+            self.request_count += 1
             resp = await api.make_request(
                 url="https://www.tiktok.com/api/search/user/full/",
                 params=params,
@@ -634,6 +640,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         )
 
     async def _profile_from_user(self, user: Any, *, niche: str) -> CandidateProfile:
+        self.request_count += 1
         info = await user.info()
         user_info = self._get(info, "userInfo", default=info)
         user_data = self._get(user_info, "user", default={})
@@ -716,6 +723,8 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
     async def _collect_recent_videos(self, user: Any) -> tuple[list[int], set[str]]:
         views: list[int] = []
         hashtags: set[str] = set()
+        # shortcut: counts one request per video fetch, true while recent_video_count fits one page (~30).
+        self.request_count += 1
         async for video in user.videos(count=self.recent_video_count):
             video_data = video.as_dict
             video_stats = self._get(video_data, "stats", default={})
