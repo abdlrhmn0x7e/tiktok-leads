@@ -47,6 +47,15 @@ _ASSET_SUFFIXES = (
     ".css", ".js", ".woff", ".woff2", ".ttf", ".mp4", ".webm",
 )
 
+# Shop and host pages print their own support or placeholder addresses
+# (api-services-support@amazon.com, dispute@temu.com, filler@godaddy.com),
+# which are never the creator's.
+_PLATFORM_EMAIL_DOMAINS = ("amazon.com", "temu.com", "godaddy.com", "example.com")
+
+# Embedded font licences put their authors' emails in <style> blocks. Scripts
+# stay: site builders keep the real contact email in hydration JSON there.
+_STYLE_BLOCK_RE = re.compile(r"(?is)<style\b.*?</style\s*>")
+
 _FETCH_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -138,12 +147,14 @@ def _emails_from_url(url: str, *, timeout_seconds: float) -> list[str]:
 
     # mailto: links are the highest-confidence signal and survive URL-encoding.
     chunks = [unquote(m) for m in _MAILTO_RE.findall(html)]
-    chunks.append(html)
-    return [email for email in extract_emails(*chunks) if not _looks_like_asset(email)]
+    chunks.append(_STYLE_BLOCK_RE.sub(" ", html))
+    return [email for email in extract_emails(*chunks) if not _is_noise(email)]
 
 
-def _looks_like_asset(email: str) -> bool:
-    return email.endswith(_ASSET_SUFFIXES)
+def _is_noise(email: str) -> bool:
+    domain = email.rsplit("@", 1)[-1]
+    on_platform = any(domain == d or domain.endswith(f".{d}") for d in _PLATFORM_EMAIL_DOMAINS)
+    return email.endswith(_ASSET_SUFFIXES) or on_platform
 
 
 def _is_link_service(url: str) -> bool:
