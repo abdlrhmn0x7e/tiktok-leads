@@ -181,7 +181,9 @@ def _trending_slots(trending: list[WorkItem], *, general_count: int, share: floa
     random.shuffle(repeatable)
     slots = once[:count]
     if repeatable:
-        slots += [repeatable[i % len(repeatable)] for i in range(count - len(slots))]
+        # A tag's second run in a sweep resumes its cursor; past that its feed is drained.
+        repeats = min(count - len(slots), 2 * len(repeatable))
+        slots += [repeatable[i % len(repeatable)] for i in range(repeats)]
     return slots
 
 
