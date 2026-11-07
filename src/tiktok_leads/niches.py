@@ -47,7 +47,6 @@ NICHE_HASHTAGS: dict[str, tuple[str, ...]] = {
         "fatlosstips",
         "weightlosstips",
         "gymtransformation",
-        "dietitian",
     ),
     "mom": (
         "momtok",
@@ -326,15 +325,68 @@ GENERIC_HASHTAGS: frozenset[str] = frozenset(
 )
 
 
-def is_harvestable_hashtag(tag: str) -> bool:
+# leads-hub review data (2026-11), fitness leads grouped by the hashtag that
+# first surfaced them: each of these had >=70% of reviewed leads rejected
+# (n>=8), against 0-25% for workout/coach tags (#gluteworkout 2.5% of n=40,
+# #legday 6%, #fitnesscoach 0%). They are never crawled, whether seed,
+# trending, or harvested. Trending ones stay listed in TRENDING_HASHTAGS so
+# --stats still attributes past leads to them.
+REJECTED_HASHTAGS: dict[str, frozenset[str]] = {
+    "fitness": frozenset(
+        {
+            "aestheticeats",
+            "cottagecheese",
+            "dietitian",
+            "fit",
+            "food",
+            "glowup",
+            "guttok",
+            "healthy",
+            "highprotein",
+            "makeup",
+            "outfitinspo",
+            "proteincoffee",
+            "tinnedfish",
+            "transformation",
+            "travel",
+            "whatieatinaday",
+        }
+    ),
+}
+
+# A harvested hashtag must contain one of its niche's stems: off-niche tags
+# (#makeup, #skincare, #food, #creatorsearchinsights) were the most-mentioned
+# harvested fitness tags and pulled in creators reviewers reject.
+HARVEST_STEMS: dict[str, tuple[str, ...]] = {
+    "fitness": (
+        "gym", "fit", "workout", "lift", "train", "muscle", "glute", "abs", "legday",
+        "bicep", "pilates", "yoga", "calisthenic", "bodybuild", "powerlift", "crossfit",
+        "hyrox", "marathon", "running", "runner", "strength", "cardio", "hiit",
+        "weightloss", "fatloss", "protein", "macro", "calorie", "mealprep", "nutrition",
+        "coach",
+    ),
+}
+
+
+def is_harvestable_hashtag(tag: str, niche: str | None = None) -> bool:
     """Worth feeding into the discovery flywheel: long enough to mean
-    something, not generic engagement bait, not just digits."""
+    something, not generic engagement bait, not just digits, not rejected by
+    reviewers, and on-niche when `niche` has stems."""
     tag = tag.strip().lower()
-    return len(tag) >= 3 and not tag.isdigit() and tag not in GENERIC_HASHTAGS
+    stems = HARVEST_STEMS.get((niche or "").strip().lower())
+    # "outfit" contains the "fit" stem but is fashion, not fitness.
+    on_niche = not stems or any(stem in tag.replace("outfit", "") for stem in stems)
+    return (
+        len(tag) >= 3
+        and not tag.isdigit()
+        and tag not in GENERIC_HASHTAGS
+        and tag not in REJECTED_HASHTAGS.get((niche or "").strip().lower(), ())
+        and on_niche
+    )
 
 
 def hashtags_for_niche(niche: str) -> tuple[str, ...]:
-    return NICHE_HASHTAGS.get(niche.strip().lower(), ())
+    return _crawlable(niche, NICHE_HASHTAGS)
 
 
 def search_terms_for_niche(niche: str) -> tuple[str, ...]:
@@ -342,7 +394,13 @@ def search_terms_for_niche(niche: str) -> tuple[str, ...]:
 
 
 def trending_hashtags_for_niche(niche: str) -> tuple[str, ...]:
-    return TRENDING_HASHTAGS.get(niche.strip().lower(), ())
+    return _crawlable(niche, TRENDING_HASHTAGS)
+
+
+def _crawlable(niche: str, lists: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
+    key = niche.strip().lower()
+    rejected = REJECTED_HASHTAGS.get(key, frozenset())
+    return tuple(tag for tag in lists.get(key, ()) if tag not in rejected)
 
 
 def trending_search_terms_for_niche(niche: str) -> tuple[str, ...]:

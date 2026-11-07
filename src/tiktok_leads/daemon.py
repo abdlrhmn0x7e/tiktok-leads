@@ -14,6 +14,7 @@ from tiktok_leads.factory import build_source
 from tiktok_leads.niches import (
     SEARCH_NICHE,
     hashtags_for_niche,
+    is_harvestable_hashtag,
     search_terms_for_niche,
     trending_hashtags_for_niche,
     trending_found_via,
@@ -60,6 +61,7 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
     trending: list[WorkItem] = []
     seen: set[tuple[str, str, str]] = set()
     trending_sources = trending_found_via()
+    skipped_hashtags = 0
 
     def add(item: WorkItem) -> None:
         key = (item.kind, item.niche, item.value.lower())
@@ -78,17 +80,27 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
         for tag in hashtags_for_niche(niche):
             add(WorkItem("hashtag", niche, tag))
         if settings.discovery_use_harvested_hashtags:
-            for tag in repository.due_hashtags(
-                niche=niche,
-                limit=settings.discovery_harvested_hashtags_per_niche,
-                min_times_seen=settings.discovery_harvested_min_mentions,
-                not_scraped_within_days=settings.discovery_harvested_recrawl_after_days,
-            ):
-                if f"#{tag.lower()}" not in trending_sources:
-                    add(WorkItem("hashtag", niche, tag, harvested=True))
+            due = [
+                tag
+                for tag in repository.due_hashtags(
+                    niche=niche,
+                    min_times_seen=settings.discovery_harvested_min_mentions,
+                    not_scraped_within_days=settings.discovery_harvested_recrawl_after_days,
+                )
+                if f"#{tag.lower()}" not in trending_sources
+            ]
+            harvestable = [tag for tag in due if is_harvestable_hashtag(tag, niche)]
+            skipped_hashtags += len(due) - len(harvestable)
+            for tag in harvestable[: settings.discovery_harvested_hashtags_per_niche]:
+                add(WorkItem("hashtag", niche, tag, harvested=True))
         if settings.effective_discovery_search:
             for term in search_terms_for_niche(niche):
                 add(WorkItem("search", niche, term))
+
+    logger.info(
+        "daemon: skipping %s harvested hashtag(s) that are off-niche or reviewer-rejected",
+        skipped_hashtags,
+    )
 
     # Run regardless of discovery_search: these are terms someone asked for.
     for term, niche in fetch_search_terms(settings):

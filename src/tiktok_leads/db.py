@@ -317,14 +317,12 @@ class LeadRepository:
         self,
         *,
         niche: str,
-        limit: int,
         min_times_seen: int = 2,
         not_scraped_within_days: int = 7,
     ) -> list[str]:
-        """Harvested hashtags worth crawling: seen enough times and not scraped
-        recently. Ordered by how often we've seen them (strongest signal first).
-        Generic tags are re-filtered here too, so rows harvested before the
-        stoplist existed never get crawled."""
+        """Harvested hashtags seen enough times and not scraped recently,
+        strongest signal first. The caller applies is_harvestable_hashtag and
+        its cap, so rows harvested before a rule existed never get crawled."""
         rows = self.connection.execute(
             """
             SELECT hashtag FROM discovered_hashtags
@@ -335,8 +333,7 @@ class LeadRepository:
             """,
             (niche, min_times_seen, f"-{not_scraped_within_days} days"),
         ).fetchall()
-        tags = [str(row["hashtag"]) for row in rows if is_harvestable_hashtag(str(row["hashtag"]))]
-        return tags[:limit]
+        return [str(row["hashtag"]) for row in rows]
 
     def mark_hashtag_scraped(self, hashtag: str, *, niche: str) -> None:
         tag = hashtag.removeprefix("#").strip().lower()
