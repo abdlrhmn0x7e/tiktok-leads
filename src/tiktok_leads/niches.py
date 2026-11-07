@@ -354,6 +354,80 @@ REJECTED_HASHTAGS: dict[str, frozenset[str]] = {
     ),
 }
 
+
+# Yahoo web-search phrases, each run as `site:tiktok.com <phrase>`. Results
+# show the creator's bio email and follower count in the snippet, so hits are
+# pre-filtered before any TikTok request. Gmail phrases yielded ~2.5 new usable
+# creators per query; "collab"/"brand deals" without a domain yielded ~0.1.
+YAHOO_QUERIES: dict[str, tuple[str, ...]] = {
+    "fitness": (
+        '"gmail.com" "personal trainer"',
+        '"gmail.com" "fitness coach"',
+        '"gmail.com" "online coach" gym',
+        '"gmail.com" "nutrition coach"',
+        '"gmail.com" "NASM"',
+        '"gmail.com" "ISSA" trainer',
+        '"gmail.com" bodybuilding',
+        '"gmail.com" "powerlifting"',
+        '"gmail.com" "pilates"',
+        '"gmail.com" "calisthenics"',
+        '"gmail.com" "weight loss" coach',
+        '"gmail.com" "macros"',
+        '"gmail.com" "high protein"',
+        '"gmail.com" "hybrid athlete"',
+        '"collabs" "gmail.com" fitness',
+        '"gmail.com" "glute"',
+        '"gmail.com" "run club" running',
+        '"gmail.com" "strength coach"',
+        '"gmail.com" "fat loss"',
+        '"gmail.com" "glute workout"',
+        '"outlook.com" "personal trainer"',
+        '"gmail.com" "pilates instructor"',
+        '"outlook.com" "running coach"',
+        '"outlook.com" "meal prep"',
+        '"gmail.com" "hyrox"',
+        '"gmail.com" "crossfit"',
+        '"gmail.com" "weight loss coach"',
+        '"gmail.com" "home workout"',
+        '"gmail.com" "protein recipes"',
+        '"gmail.com" "fitness journey"',
+        '"gmail.com" "bodybuilder"',
+        '"gmail.com" "gymtok"',
+        '"gmail.com" "strength training"',
+        '"gmail.com" "yoga instructor"',
+        '"gmail.com" "marathon"',
+        '"gmail.com" "high protein meals"',
+        '"gmail.com" "gym girl"',
+        '"gmail.com" "fitness influencer"',
+        '"gmail.com" "workout routine"',
+        '"gmail.com" "online personal trainer"',
+        '"gmail.com" "certified personal trainer"',
+        '"gmail.com" "leg day"',
+        '"gmail.com" "fitness model"',
+        '"gmail.com" "physique"',
+        '"gmail.com" "bikini competitor"',
+        '"gmail.com" "transformation"',
+        '"gmail.com" "postpartum fitness"',
+        '"gmail.com" "fit mom"',
+        '"gmail.com" "calorie deficit"',
+        '"gmail.com" "dietitian"',
+        '"gmail.com" "triathlon"',
+        '"gmail.com" "kettlebell"',
+        '"gmail.com" "lifting"',
+        '"gmail.com" "booty workout"',
+        '"gmail.com" "barre"',
+        '"gmail.com" "boxing coach"',
+        '"gmail.com" "mobility"',
+        '"outlook.com" "fitness coach"',
+        '"outlook.com" "gym"',
+        '"outlook.com" "workout"',
+        '"outlook.com" "nutrition coach"',
+        '"outlook.com" "glute"',
+        '"outlook.com" "weight loss"',
+        '"outlook.com" "bodybuilding"',
+    ),
+}
+
 # A harvested hashtag must contain one of its niche's stems: off-niche tags
 # (#makeup, #skincare, #food, #creatorsearchinsights) were the most-mentioned
 # harvested fitness tags and pulled in creators reviewers reject.
@@ -391,6 +465,10 @@ def hashtags_for_niche(niche: str) -> tuple[str, ...]:
 
 def search_terms_for_niche(niche: str) -> tuple[str, ...]:
     return NICHE_SEARCH_TERMS.get(niche.strip().lower(), ())
+
+
+def yahoo_queries_for_niche(niche: str) -> tuple[str, ...]:
+    return YAHOO_QUERIES.get(niche.strip().lower(), ())
 
 
 def trending_hashtags_for_niche(niche: str) -> tuple[str, ...]:

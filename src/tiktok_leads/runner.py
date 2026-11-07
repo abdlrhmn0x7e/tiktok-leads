@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterable, Callable, Iterable, Sized
+from collections.abc import AsyncIterable, Callable, Iterable, Mapping, Sized
 from dataclasses import replace
 
 from tiktok_leads.db import LeadRepository
@@ -30,12 +30,22 @@ async def scrape_handles(
     min_average_views: int,
     found_via: str = "handle",
     source_label: str | None = None,
+    known_emails: Mapping[str, str] | None = None,
 ) -> int:
+    """`known_emails` maps handle -> an email found off-profile (e.g. in a
+    search snippet), used when the bio has none."""
     handle_count = len(handles) if isinstance(handles, Sized) else "provided"
     logger.info("checking %s handle(s) for niche=%s", handle_count, niche)
     candidates = source.profiles_from_handles(handles, niche=niche)
     if source_label:
         candidates = (replace(candidate, source=source_label) async for candidate in candidates)
+    if known_emails:
+        candidates = (
+            replace(candidate, extra_emails=[*candidate.extra_emails, known_emails[candidate.handle.lower()]])
+            if candidate.handle.lower() in known_emails
+            else candidate
+            async for candidate in candidates
+        )
     return await _process_candidates(
         candidates,
         repository,

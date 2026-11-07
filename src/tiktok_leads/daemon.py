@@ -19,6 +19,7 @@ from tiktok_leads.niches import (
     trending_hashtags_for_niche,
     trending_found_via,
     trending_search_terms_for_niche,
+    yahoo_queries_for_niche,
 )
 from tiktok_leads.notifiers import Notifier
 from tiktok_leads.runner import (
@@ -31,15 +32,17 @@ from tiktok_leads.runner import (
 from tiktok_leads.settings import Settings
 from tiktok_leads.sources import TikTokApiSource
 from tiktok_leads.sources.tiktokapi_source import TikTokBlockedError
+from tiktok_leads.yahoo_discovery import is_done as yahoo_query_done
+from tiktok_leads.yahoo_discovery import next_page_emails
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class WorkItem:
-    kind: str  # "hashtag" | "search" | "recheck"
+    kind: str  # "hashtag" | "search" | "recheck" | "yahoo"
     niche: str
-    value: str  # hashtag, search phrase, or handle
+    value: str  # hashtag, search phrase, handle, or Yahoo query
     harvested: bool = False  # hashtag came from the harvesting flywheel
     trending: bool = False  # from TRENDING_HASHTAGS / TRENDING_SEARCH_TERMS
 
@@ -50,6 +53,8 @@ class WorkItem:
             return f"#{self.value}{'*' if self.harvested else ''}{trend}({self.niche})"
         if self.kind == "search":
             return f"search:{self.value!r}{trend}({self.niche})"
+        if self.kind == "yahoo":
+            return f"yahoo:{self.value!r}({self.niche})"
         return f"recheck:@{self.value}({self.niche})"
 
 
@@ -98,6 +103,10 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
         if settings.effective_discovery_search:
             for term in search_terms_for_niche(niche):
                 add(WorkItem("search", niche, term))
+        # One item reads one result page; later sweeps continue from the query's cursor.
+        for query in yahoo_queries_for_niche(niche):
+            if not yahoo_query_done(repository, query, max_age_days=settings.feed_cursor_max_age_days):
+                add(WorkItem("yahoo", niche, query))
 
     logger.info(
         "daemon: skipping %s harvested hashtag(s) that are off-niche or reviewer-rejected",
@@ -377,7 +386,26 @@ async def _run_batch(
             continue
 
         exclude_handles = repository.excluded_handles(settings.recheck_after_days)
-        if item.kind == "search":
+        if item.kind == "yahoo":
+            emails = await next_page_emails(
+                repository,
+                item.value,
+                min_followers=settings.min_followers,
+                exclude_handles=exclude_handles,
+                max_age_days=settings.feed_cursor_max_age_days,
+            )
+            inserted += await scrape_handles(
+                source,
+                repository,
+                notifier,
+                handles=list(emails),
+                niche=item.niche,
+                min_followers=settings.min_followers,
+                min_average_views=settings.min_average_views,
+                found_via=f"yahoo:{item.value}",
+                known_emails=emails,
+            )
+        elif item.kind == "search":
             inserted += await scrape_search(
                 source,
                 repository,
