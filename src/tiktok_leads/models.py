@@ -14,6 +14,7 @@ class CandidateProfile:
     niche: str
     followers_count: int | None = None
     recent_video_views: list[int] = field(default_factory=list)
+    recent_video_captions: list[str] = field(default_factory=list)
     bio: str = ""
     external_links: list[str] = field(default_factory=list)
     source: str = "unknown"

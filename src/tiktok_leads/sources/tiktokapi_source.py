@@ -629,7 +629,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     source="tiktokapi",
                     discovered_hashtags=sorted(feed_hashtags),
                 )
-        views, hashtags = await self._collect_recent_videos(user)
+        views, captions, hashtags = await self._collect_recent_videos(user)
         hashtags |= feed_hashtags
         return CandidateProfile(
             handle=handle,
@@ -637,6 +637,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             niche=niche,
             followers_count=followers,
             recent_video_views=views,
+            recent_video_captions=captions,
             bio=bio,
             external_links=[],
             source="tiktokapi",
@@ -697,13 +698,14 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     source="tiktokapi",
                 )
 
-        views, hashtags = await self._collect_recent_videos(user)
+        views, captions, hashtags = await self._collect_recent_videos(user)
         return CandidateProfile(
             handle=handle,
             profile_url=f"https://www.tiktok.com/@{handle}",
             niche=niche,
             followers_count=followers,
             recent_video_views=views,
+            recent_video_captions=captions,
             bio=bio,
             external_links=links,
             source="tiktokapi",
@@ -725,8 +727,9 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             logger.info("found email via bio link for @%s: %s", handle, emails[0])
         return emails
 
-    async def _collect_recent_videos(self, user: Any) -> tuple[list[int], set[str]]:
+    async def _collect_recent_videos(self, user: Any) -> tuple[list[int], list[str], set[str]]:
         views: list[int] = []
+        captions: list[str] = []
         hashtags: set[str] = set()
         # shortcut: counts one request per video fetch, true while recent_video_count fits one page (~30).
         self.request_count += 1
@@ -736,8 +739,9 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             play_count = self._parse_int(self._get(video_stats, "playCount", "play_count", default=None))
             if play_count is not None:
                 views.append(play_count)
+            captions.append(str(self._get(video_data, "desc", default="") or ""))
             hashtags.update(self._extract_hashtags(video_data))
-        return views, hashtags
+        return views, captions, hashtags
 
     async def _delay(self) -> None:
         delay = self.request_delay_seconds

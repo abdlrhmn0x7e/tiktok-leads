@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from tiktok_leads.email_extractor import extract_emails
 from tiktok_leads.models import CandidateProfile, Lead
+from tiktok_leads.niches import is_on_niche
 from tiktok_leads.numbers import floor_view_count
 
 
@@ -55,6 +56,13 @@ def evaluate_candidate(
             lead=None,
             skip_reason=f"average views below threshold ({views} < {min_average_views:,})",
             skip_code="low_views",
+        )
+
+    if not is_on_niche(candidate.niche, candidate.bio, candidate.recent_video_captions):
+        return LeadEvaluation(
+            lead=None,
+            skip_reason=f"bio and recent captions are not about {candidate.niche}",
+            skip_code="off_niche",
         )
 
     rounded_average_views = floor_view_count(average_views)

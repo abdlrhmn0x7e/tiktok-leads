@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from collections.abc import Sequence
+
 # Tag lists were pruned on 2026-09-18 using leads-hub review data: for "mom",
 # identity/vlog tags (#momvlog, #sahmlife, #girlmom) were accepted 80-95% of
 # the time while advice/coach tags (#parentingtips, #momcoach, #momtips) fell
@@ -457,6 +460,35 @@ def is_harvestable_hashtag(tag: str, niche: str | None = None) -> bool:
         and tag not in REJECTED_HASHTAGS.get((niche or "").strip().lower(), ())
         and on_niche
     )
+
+
+# Words a gym or strength-training creator uses in their own bio and captions.
+# A creator who posted one video under a fitness hashtag is usually not one:
+# reviewers rejected 85% of the leads pushed 2026-11-05..10. Running and yoga
+# words are left out because reviewers kept 6 of 31 such creators.
+CONTENT_TERMS: dict[str, re.Pattern[str]] = {
+    "fitness": re.compile(
+        r"(?i)(?<![a-z])(?:"
+        r"gym\w*|fitness\w*|fittok|fitfam|workouts?|work ?out|lift(?:ing|er|s)?|powerlift\w*"
+        r"|weightlift\w*|bodybuild\w*|physique|personal train\w*|trainer|training|coach(?:ing)?"
+        r"|pilates|calisthenics\w*|strength\w*|muscles?\w*|glutes?\w*|abs|leg ?day|squats?"
+        r"|deadlift\w*|bench(?:press)?|hypertrophy|bulk(?:ing)?|shred\w*|gains|macros?|protein\w*"
+        r"|calories?|calorie ?deficit|fat ?loss|weight ?loss\w*|athlete|ifbb|cardio|hiit|hyrox"
+        r"|crossfit|mobility|nutrition\w*"
+        r")(?![a-z])"
+    ),
+}
+
+
+def is_on_niche(niche: str, bio: str, captions: Sequence[str]) -> bool:
+    """Whether the creator's own content is about `niche`: three recent
+    captions use its words, or the bio and one caption do. Niches without a
+    word list always pass."""
+    terms = CONTENT_TERMS.get(niche.strip().lower())
+    if terms is None:
+        return True
+    hits = sum(bool(terms.search(caption)) for caption in captions)
+    return hits >= 3 or (hits >= 1 and bool(terms.search(bio)))
 
 
 def hashtags_for_niche(niche: str) -> tuple[str, ...]:
