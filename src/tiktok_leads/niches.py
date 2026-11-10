@@ -482,12 +482,13 @@ CONTENT_TERMS: dict[str, re.Pattern[str]] = {
 
 def is_on_niche(niche: str, bio: str, captions: Sequence[str]) -> bool:
     """Whether the creator's own content is about `niche`: three recent
-    captions use its words, or the bio and one caption do. Niches without a
-    word list always pass."""
+    captions use its words, or the bio and one caption do. Hashtags in
+    captions do not count: music and edit pages tag every video #gym.
+    Niches without a word list always pass."""
     terms = CONTENT_TERMS.get(niche.strip().lower())
     if terms is None:
         return True
-    hits = sum(bool(terms.search(caption)) for caption in captions)
+    hits = sum(bool(terms.search(re.sub(r"#\S+", "", caption))) for caption in captions)
     return hits >= 3 or (hits >= 1 and bool(terms.search(bio)))
 
 

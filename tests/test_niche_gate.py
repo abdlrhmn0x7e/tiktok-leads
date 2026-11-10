@@ -24,8 +24,13 @@ def test_creator_with_one_fitness_video_is_off_niche():
 
 
 def test_gym_captions_make_a_fitness_lead():
-    captions = ["leg day", "#gym #powerlifting", "8 weeks out, 510kg total", "squat PR", "meet prep"]
+    captions = ["leg day", "new deadlift cue", "8 weeks out, 510kg total", "squat PR", "meet prep"]
     assert evaluate("fitness", "", captions).lead is not None
+
+
+def test_gym_hashtags_alone_do_not_count():
+    captions = ["song name in comments #gym #gymtok", "drop soon #gymmusic", "#gymmotivation #workout", "#fitness"]
+    assert evaluate("fitness", "1 million+ monthly on Spotify!", captions).skip_code == "off_niche"
 
 
 def test_fitness_bio_needs_one_fitness_caption():
