@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Coroutine, Iterable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -21,8 +22,11 @@ from tiktok_leads.bio_links import bio_hints_link_page, emails_from_bio_links
 from tiktok_leads.email_extractor import extract_emails
 from tiktok_leads.models import CandidateProfile
 from tiktok_leads.sources.base import TikTokSource
+from tiktok_leads.sources.embed import fetch_embed
 
 logger = logging.getLogger(__name__)
+
+_CAPTION_HASHTAG = re.compile(r"#(\w+)")
 
 # A hashtag crawl gives up after this many raw feed items per requested new
 # candidate, so a feed whose every author is already evaluated still ends.
@@ -36,18 +40,14 @@ class _Counter:
         self.value = 0
 
 # Exceptions that mean TikTok is rate-limiting/bot-detecting us, as opposed to
-# a profile being deleted, private, or renamed. Only these count toward the
-# consecutive-blocked counter — otherwise a run of dead profiles triggers
-# session restarts and multi-hour daemon backoffs for nothing.
+# a profile being deleted, private, or renamed. These and unexplained failures
+# count toward the consecutive-blocked counter; dead profiles do not, or a run
+# of them triggers session restarts and multi-hour daemon backoffs for nothing.
 _BLOCK_EXCEPTIONS = (EmptyResponseException, CaptchaException)
 
 # Consecutive feed-level (hashtag/search listing) block errors before we give
 # up the batch. Two in a row distinguishes a real block from one odd/banned tag.
 _MAX_FEED_BLOCK_STREAK = 2
-
-
-class ProfileUnavailableError(RuntimeError):
-    pass
 
 
 class TikTokBlockedError(RuntimeError):
@@ -80,7 +80,6 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         request_jitter_seconds: float,
         max_consecutive_blocked_profiles: int,
         block_cooldown_seconds: float,
-        max_block_cooldowns_per_hashtag: int,
         restart_session_on_block: bool,
         restart_session_between_hashtags: bool,
         proxy_provider: Any | None,
@@ -104,7 +103,6 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         self.request_jitter_seconds = request_jitter_seconds
         self.max_consecutive_blocked_profiles = max_consecutive_blocked_profiles
         self.block_cooldown_seconds = block_cooldown_seconds
-        self.max_block_cooldowns_per_hashtag = max_block_cooldowns_per_hashtag
         self.restart_session_on_block = restart_session_on_block
         self.restart_session_between_hashtags = restart_session_between_hashtags
         self.proxy_provider = proxy_provider
@@ -113,6 +111,8 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         self.bio_link_max_fetches = bio_link_max_fetches
         self.api: TikTokApi | None = None
         self._feed_block_streak = 0
+        # Kept across calls: the daemon rechecks one handle per call.
+        self._handle_block_streak = 0
         # TikTok requests made over this source's life; the daemon paces its
         # rest by how many a cycle made.
         self.request_count = 0
@@ -192,27 +192,24 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         *,
         niche: str,
     ) -> AsyncIterable[CandidateProfile]:
-        consecutive_blocked = 0
-        cooldowns = 0
         for handle in handles:
-            api = self._api()
             username = handle.removeprefix("@").strip()
             if not username:
                 continue
             result = await self._safe_fetch(
-                self._profile_from_user(api.user(username=username), niche=niche),
+                self._profile_from_user(username, niche=niche),
                 handle=username,
             )
             if result.profile is not None:
-                consecutive_blocked = 0
+                self._handle_block_streak = 0
                 yield result.profile
             elif result.blocked:
-                consecutive_blocked += 1
-                if await self._recover_if_blocked(consecutive_blocked, context="handle scan"):
-                    consecutive_blocked = 0
-                    cooldowns += 1
-                    if cooldowns > self.max_block_cooldowns_per_hashtag:
-                        raise TikTokBlockedError("repeated TikTok blocking during handle scan")
+                self._handle_block_streak += 1
+                if self._handle_block_streak >= self.max_consecutive_blocked_profiles:
+                    self._handle_block_streak = 0
+                    raise TikTokBlockedError(
+                        f"{self.max_consecutive_blocked_profiles} profile checks in a row failed"
+                    )
             await self._delay()
 
     async def profiles_from_hashtag(
@@ -346,7 +343,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                         feed_hashtags=set(),
                     )
                 else:
-                    fetch = self._profile_from_user(api.user(username=handle), niche=niche)
+                    fetch = self._profile_from_user(handle, niche=niche)
                 result = await self._safe_fetch(
                     fetch,
                     handle=handle,
@@ -573,7 +570,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                 context=context,
             )
         return await self._safe_fetch(
-            self._profile_from_user(api.user(username=handle), niche=niche),
+            self._profile_from_user(handle, niche=niche),
             handle=handle,
             context=context,
         )
@@ -591,7 +588,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         except _BLOCK_EXCEPTIONS as error:
             logger.warning("blocked while fetching @%s%s: %s", handle, suffix, error)
             return _Fetch(None, blocked=True)
-        except (NotFoundException, ProfileUnavailableError, KeyError) as error:
+        except (NotFoundException, KeyError) as error:
             logger.warning("skipped @%s%s: profile unavailable (%s)", handle, suffix, error)
             return _Fetch(None)
         except Exception as error:
@@ -599,8 +596,10 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                 logger.warning("all sessions died while fetching @%s%s; restarting", handle, suffix)
                 await self._restart_session()
                 return _Fetch(None)
+            # TikTok refusing every profile shows up here (2026-11-09: a non-JSON
+            # body), so an unexplained failure counts toward the block streak.
             logger.exception("failed to fetch profile @%s%s", handle, suffix)
-            return _Fetch(None)
+            return _Fetch(None, blocked=True)
 
     async def _profile_from_videos(
         self,
@@ -645,71 +644,37 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             extra_emails=extra_emails,
         )
 
-    async def _profile_from_user(self, user: Any, *, niche: str) -> CandidateProfile:
+    async def _profile_from_user(self, handle: str, *, niche: str) -> CandidateProfile:
+        """The whole profile from the embed page, one unsigned request. The
+        signed user-detail call it replaces failed for every profile on
+        2026-11-09."""
         self.request_count += 1
-        info = await user.info()
-        user_info = self._get(info, "userInfo", default=info)
-        user_data = self._get(user_info, "user", default={})
-        stats = self._get(user_info, "stats", "statsV2", default={})
-        if not isinstance(user_data, dict) or not user_data.get("id"):
-            raise ProfileUnavailableError("missing userInfo.user.id")
-
-        handle = str(self._get(user_data, "uniqueId", "unique_id", default="")).strip()
-        if not handle and hasattr(user, "username"):
-            handle = str(user.username).strip()
-
-        bio = str(self._get(user_data, "signature", default="") or "")
-        followers = self._parse_int(self._get(stats, "followerCount", "follower_count", default=None))
-        links = self._extract_links(user_data)
-
-        if (
-            self.skip_videos_below_min_followers
-            and followers is not None
-            and followers < self.min_followers
-        ):
-            logger.info(
-                "skipping recent videos for @%s: followers below threshold (%s < %s)",
-                handle,
-                followers,
-                self.min_followers,
-            )
+        embed = await asyncio.to_thread(fetch_embed, handle)
+        if embed is None:
+            # Deleted or renamed. Returned without followers so the runner
+            # records the handle; left unrecorded, a recheck retries it every sweep.
+            logger.info("@%s no longer exists", handle)
             return CandidateProfile(
                 handle=handle,
                 profile_url=f"https://www.tiktok.com/@{handle}",
                 niche=niche,
-                followers_count=followers,
-                bio=bio,
-                external_links=links,
                 source="tiktokapi",
             )
-
         extra_emails: list[str] = []
-        if not extract_emails(bio, *links):
-            extra_emails = await self._resolve_bio_link_emails(handle, bio, links)
-            if self.skip_videos_without_email and not extra_emails:
-                logger.info("skipping recent videos for @%s: no public email in profile", handle)
-                return CandidateProfile(
-                    handle=handle,
-                    profile_url=f"https://www.tiktok.com/@{handle}",
-                    niche=niche,
-                    followers_count=followers,
-                    bio=bio,
-                    external_links=links,
-                    source="tiktokapi",
-                )
-
-        views, captions, hashtags = await self._collect_recent_videos(user)
+        if embed.followers >= self.min_followers and not extract_emails(embed.bio):
+            extra_emails = await self._resolve_bio_link_emails(embed.handle, embed.bio, [])
         return CandidateProfile(
-            handle=handle,
-            profile_url=f"https://www.tiktok.com/@{handle}",
+            handle=embed.handle,
+            profile_url=f"https://www.tiktok.com/@{embed.handle}",
             niche=niche,
-            followers_count=followers,
-            recent_video_views=views,
-            recent_video_captions=captions,
-            bio=bio,
-            external_links=links,
+            followers_count=embed.followers,
+            recent_video_views=embed.views,
+            recent_video_captions=embed.captions,
+            bio=embed.bio,
             source="tiktokapi",
-            discovered_hashtags=sorted(hashtags),
+            discovered_hashtags=sorted(
+                {tag.lower() for caption in embed.captions for tag in _CAPTION_HASHTAG.findall(caption)}
+            ),
             extra_emails=extra_emails,
         )
 
@@ -818,16 +783,3 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             return int(value)
         except (TypeError, ValueError):
             return None
-
-    def _extract_links(self, user_data: dict[str, Any]) -> list[str]:
-        links: list[str] = []
-        bio_link = self._get(user_data, "bioLink", default={})
-        if isinstance(bio_link, dict):
-            link = self._get(bio_link, "link", default=None)
-            if link:
-                links.append(str(link))
-        for key in ("ins_id", "youtube_channel_title", "twitter_id"):
-            value = self._get(user_data, key, default=None)
-            if value:
-                links.append(str(value))
-        return links

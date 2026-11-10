@@ -54,7 +54,6 @@ class Settings(BaseSettings):
     tiktok_skip_videos_below_min_followers: bool = True
     tiktok_max_consecutive_blocked_profiles: int = 5
     tiktok_block_cooldown_seconds: float = 10.0
-    tiktok_max_block_cooldowns_per_hashtag: int = 1
     tiktok_restart_session_on_block: bool = True
     # Off by default: a warm session with established cookies is both faster and
     # less likely to be challenged than a fresh one. Restarting on block suffices.

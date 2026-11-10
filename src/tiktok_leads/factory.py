@@ -103,7 +103,6 @@ def build_source(settings: Settings) -> TikTokApiSource:
         request_jitter_seconds=settings.effective_request_jitter_seconds,
         max_consecutive_blocked_profiles=settings.tiktok_max_consecutive_blocked_profiles,
         block_cooldown_seconds=settings.tiktok_block_cooldown_seconds,
-        max_block_cooldowns_per_hashtag=settings.tiktok_max_block_cooldowns_per_hashtag,
         restart_session_on_block=settings.tiktok_restart_session_on_block,
         restart_session_between_hashtags=settings.tiktok_restart_session_between_hashtags,
         proxy_provider=proxy_provider,
