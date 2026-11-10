@@ -119,6 +119,7 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
 
     if settings.recheck_enabled:
         for handle, handle_niche in repository.handles_due_for_recheck(
+            niches=niches,
             after_days=settings.recheck_after_days,
             limit=settings.recheck_handles_per_sweep,
         ):

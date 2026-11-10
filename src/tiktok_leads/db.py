@@ -251,13 +251,15 @@ class LeadRepository:
     def handles_due_for_recheck(
         self,
         *,
+        niches: list[str],
         after_days: int,
         limit: int,
         reasons: tuple[str, ...] = ("no_email",),
     ) -> list[tuple[str, str]]:
-        """Stale, non-lead profiles worth re-checking for a newly-added email.
-        Returns (handle, niche) ordered oldest-first."""
+        """Stale, non-lead profiles in `niches` worth re-checking for a
+        newly-added email. Returns (handle, niche) ordered oldest-first."""
         placeholders = ",".join("?" for _ in reasons)
+        niche_placeholders = ",".join("?" for _ in niches)
         rows = self.connection.execute(
             f"""
             SELECT sp.handle AS handle, sp.niche AS niche
@@ -266,11 +268,12 @@ class LeadRepository:
               ON lower(replace(i.handle, '@', '')) = sp.handle AND i.platform = 'tiktok'
             WHERE i.handle IS NULL
               AND sp.skip_reason IN ({placeholders})
+              AND sp.niche IN ({niche_placeholders})
               AND sp.last_seen_at < datetime('now', ?)
             ORDER BY sp.last_seen_at ASC
             LIMIT ?
             """,
-            (*reasons, f"-{after_days} days", limit),
+            (*reasons, *niches, f"-{after_days} days", limit),
         ).fetchall()
         return [(str(row["handle"]), str(row["niche"])) for row in rows]
 
