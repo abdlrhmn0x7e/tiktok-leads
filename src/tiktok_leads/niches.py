@@ -476,12 +476,15 @@ YAHOO_QUERIES: dict[str, tuple[str, ...]] = {
 # A harvested hashtag must contain one of its niche's stems: off-niche tags
 # (#makeup, #skincare, #food, #creatorsearchinsights) were the most-mentioned
 # harvested fitness tags and pulled in creators reviewers reject. "coach" is not
-# a stem: it crawled Coach handbag tags (#coachoutlet) and #coachella.
+# a stem: it crawled Coach handbag tags (#coachoutlet) and #coachella. Bare "fit",
+# "train", "lift", "abs", "yoga" and "marathon" are not stems either: on 2026-11-11
+# their tags (#fitjeans, #dogtraining, #lashliftandtint, #hauslabs) took 30% of
+# crawl time for 14% of leads.
 HARVEST_STEMS: dict[str, tuple[str, ...]] = {
     "fitness": (
-        "gym", "fit", "workout", "lift", "train", "muscle", "glute", "abs", "legday",
-        "bicep", "pilates", "yoga", "calisthenic", "bodybuild", "powerlift", "crossfit",
-        "hyrox", "marathon", "running", "runner", "strength", "cardio", "hiit",
+        "gym", "fitness", "fittok", "fitfam", "workout", "lifting", "weightlift", "deadlift",
+        "trainer", "muscle", "glute", "legday", "bicep", "pilates", "calisthenic", "bodybuild",
+        "powerlift", "crossfit", "hyrox", "running", "runner", "strength", "cardio", "hiit",
         "weightloss", "fatloss", "protein", "macro", "calorie", "mealprep", "nutrition",
     ),
 }
@@ -493,8 +496,8 @@ def is_harvestable_hashtag(tag: str, niche: str | None = None) -> bool:
     reviewers, and on-niche when `niche` has stems."""
     tag = tag.strip().lower()
     stems = HARVEST_STEMS.get((niche or "").strip().lower())
-    # "outfit" contains the "fit" stem but is fashion, not fitness.
-    on_niche = not stems or any(stem in tag.replace("outfit", "") for stem in stems)
+    # "gluten" contains the "glute" stem but is food, not fitness.
+    on_niche = not stems or any(stem in tag.replace("gluten", "") for stem in stems)
     return (
         len(tag) >= 3
         and not tag.isdigit()

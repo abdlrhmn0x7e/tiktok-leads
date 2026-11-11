@@ -1,5 +1,6 @@
 from tiktok_leads.filters import evaluate_candidate
 from tiktok_leads.models import CandidateProfile
+from tiktok_leads.niches import is_harvestable_hashtag
 
 
 def evaluate(niche: str, bio: str, captions: list[str]):
@@ -54,3 +55,10 @@ def test_fashion_and_event_words_do_not_count():
 
 def test_niche_without_a_word_list_is_not_gated():
     assert evaluate("mom", "", ["cat update", "", ""]).lead is not None
+
+
+def test_only_gym_hashtags_are_crawled_for_fitness():
+    for tag in ("gymtok", "fitnesscoach", "weightlifting", "personaltrainer", "glutegrowth", "backworkout"):
+        assert is_harvestable_hashtag(tag, "fitness"), tag
+    for tag in ("fitjeans", "officefits", "dogtraining", "lashliftandtint", "hauslabs", "glutenfree", "beachyoga"):
+        assert not is_harvestable_hashtag(tag, "fitness"), tag
