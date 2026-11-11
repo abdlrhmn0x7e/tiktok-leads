@@ -465,14 +465,16 @@ def is_harvestable_hashtag(tag: str, niche: str | None = None) -> bool:
 # Words a gym or strength-training creator uses in their own bio and captions.
 # A creator who posted one video under a fitness hashtag is usually not one:
 # reviewers rejected 85% of the leads pushed 2026-11-05..10. Running and yoga
-# words are left out because reviewers kept 6 of 31 such creators.
+# words are left out because reviewers kept 6 of 31 such creators. "protein"
+# and "training" are left out too: recipe pages and a dog-training page passed
+# on them (2026-11-11).
 CONTENT_TERMS: dict[str, re.Pattern[str]] = {
     "fitness": re.compile(
         r"(?i)(?<![a-z])(?:"
         r"gym\w*|fitness\w*|fittok|fitfam|workouts?|work ?out|lift(?:ing|er|s)?|powerlift\w*"
-        r"|weightlift\w*|bodybuild\w*|physique|personal train\w*|trainer|training|coach(?:ing)?"
-        r"|pilates|calisthenics\w*|strength\w*|muscles?\w*|glutes?\w*|abs|leg ?day|squats?"
-        r"|deadlift\w*|bench(?:press)?|hypertrophy|bulk(?:ing)?|shred\w*|gains|macros?|protein\w*"
+        r"|weightlift\w*|bodybuild\w*|physique|personal train\w*|trainer|coach(?:ing)?"
+        r"|pilates|calisthenics\w*|strength\w*|muscles?\w*|glute(?!n)\w*|abs|leg ?day|squats?"
+        r"|deadlift\w*|bench(?:press)?|hypertrophy|bulk(?:ing)?|shred\w*|gains|macros?"
         r"|calories?|calorie ?deficit|fat ?loss|weight ?loss\w*|athlete|ifbb|cardio|hiit|hyrox"
         r"|crossfit|mobility|nutrition\w*"
         r")(?![a-z])"

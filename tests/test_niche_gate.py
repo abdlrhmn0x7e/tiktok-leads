@@ -33,6 +33,13 @@ def test_gym_hashtags_alone_do_not_count():
     assert evaluate("fitness", "1 million+ monthly on Spotify!", captions).skip_code == "off_niche"
 
 
+def test_recipe_and_dog_training_pages_are_off_niche():
+    recipes = ["gluten free protein cookie dough", "gluten free balls", "30g protein breakfast", "vegan protein pasta"]
+    assert evaluate("fitness", "vegan recipes, vlogs", recipes).skip_code == "off_niche"
+    dogs = ["Training with the Commander!", "puppy training day 2", "training my husky", "Baby and puppy playing"]
+    assert evaluate("fitness", "animals and babies", dogs).skip_code == "off_niche"
+
+
 def test_fitness_bio_needs_one_fitness_caption():
     assert evaluate("fitness", "Online Coach, fat loss", ["", "", ""]).skip_code == "off_niche"
     assert evaluate("fitness", "Online Coach, fat loss", ["", "new workout split", ""]).lead is not None
