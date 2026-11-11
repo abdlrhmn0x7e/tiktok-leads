@@ -475,14 +475,14 @@ YAHOO_QUERIES: dict[str, tuple[str, ...]] = {
 
 # A harvested hashtag must contain one of its niche's stems: off-niche tags
 # (#makeup, #skincare, #food, #creatorsearchinsights) were the most-mentioned
-# harvested fitness tags and pulled in creators reviewers reject.
+# harvested fitness tags and pulled in creators reviewers reject. "coach" is not
+# a stem: it crawled Coach handbag tags (#coachoutlet) and #coachella.
 HARVEST_STEMS: dict[str, tuple[str, ...]] = {
     "fitness": (
         "gym", "fit", "workout", "lift", "train", "muscle", "glute", "abs", "legday",
         "bicep", "pilates", "yoga", "calisthenic", "bodybuild", "powerlift", "crossfit",
         "hyrox", "marathon", "running", "runner", "strength", "cardio", "hiit",
         "weightloss", "fatloss", "protein", "macro", "calorie", "mealprep", "nutrition",
-        "coach",
     ),
 }
 
@@ -509,12 +509,12 @@ def is_harvestable_hashtag(tag: str, niche: str | None = None) -> bool:
 # reviewers rejected 85% of the leads pushed 2026-11-05..10. Running and yoga
 # words are left out because reviewers kept 6 of 31 such creators. "protein"
 # and "training" are left out too: recipe pages and a dog-training page passed
-# on them (2026-11-11).
+# on them (2026-11-11). So is bare "coach": Coach handbag pages passed on it.
 CONTENT_TERMS: dict[str, re.Pattern[str]] = {
     "fitness": re.compile(
         r"(?i)(?<![a-z])(?:"
         r"gym\w*|fitness\w*|fittok|fitfam|workouts?|work ?out|lift(?:ing|er|s)?|powerlift\w*"
-        r"|weightlift\w*|bodybuild\w*|physique|personal train\w*|trainer|coach(?:ing)?"
+        r"|weightlift\w*|bodybuild\w*|physique|personal train\w*|trainer|coaching"
         r"|pilates|calisthenics\w*|strength\w*|muscles?\w*|glute(?!n)\w*|abs|leg ?day|squats?"
         r"|deadlift\w*|bench(?:press)?|hypertrophy|bulk(?:ing)?|shred\w*|gains|macros?"
         r"|calories?|calorie ?deficit|fat ?loss|weight ?loss\w*|athlete|ifbb|cardio|hiit|hyrox"
