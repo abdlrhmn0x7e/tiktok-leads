@@ -20,8 +20,9 @@ from tiktok_leads.db import LeadRepository
 
 logger = logging.getLogger(__name__)
 
-PAGES_PER_QUERY = 3
-RESULTS_PER_PAGE = 7
+PAGES_PER_QUERY = 5
+# Yahoo serves 5 results a page; stepping by 7 skipped two of every seven.
+RESULTS_PER_PAGE = 5
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
@@ -71,8 +72,9 @@ def _count(value: str, suffix: str) -> int | None:
 def fetch_page(query: str, page: int) -> str:
     search = quote_plus(f"site:tiktok.com {query}")
     url = f"https://search.yahoo.com/search?p={search}&b={1 + RESULTS_PER_PAGE * page}"
+    # Yahoo answers curl's HTTP/2 with an empty 500 (since 2026-11-10); HTTP/1.1 gets the page.
     result = subprocess.run(
-        ["curl", "-s", "-w", "\n%{http_code}", "-A", USER_AGENT,
+        ["curl", "-s", "--http1.1", "-w", "\n%{http_code}", "-A", USER_AGENT,
          "-H", "Accept-Language: en-US,en;q=0.9", "-H", "Accept: text/html", url],
         capture_output=True, text=True, timeout=30, check=True,
     )
