@@ -103,7 +103,7 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
         if settings.effective_discovery_search:
             for term in search_terms_for_niche(niche):
                 add(WorkItem("search", niche, term))
-        # One item reads one result page; later sweeps continue from the query's cursor.
+        # One item reads the query's unread pages; a failed fetch leaves the rest for the next sweep.
         for query in yahoo_queries_for_niche(niche):
             if not yahoo_query_done(repository, query, max_age_days=settings.feed_cursor_max_age_days):
                 add(WorkItem("yahoo", niche, query))
@@ -142,6 +142,8 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
 
     items.extend(_trending_slots(trending, general_count=len(items), share=settings.daemon_trending_share))
     random.shuffle(items)
+    # Yahoo gave 0.59 leads/min against 0.26 for hashtag crawls (2026-11-11), so it runs first (the queue pops from the end).
+    items.sort(key=lambda item: item.kind == "yahoo")
     return items
 
 
@@ -390,24 +392,29 @@ async def _run_batch(
 
         exclude_handles = repository.excluded_handles(settings.recheck_after_days)
         if item.kind == "yahoo":
-            emails = await next_page_emails(
-                repository,
-                item.value,
-                min_followers=settings.min_followers,
-                exclude_handles=exclude_handles,
-                max_age_days=settings.feed_cursor_max_age_days,
-            )
-            inserted += await scrape_handles(
-                source,
-                repository,
-                notifier,
-                handles=list(emails),
-                niche=item.niche,
-                min_followers=settings.min_followers,
-                min_average_views=settings.min_average_views,
-                found_via=f"yahoo:{item.value}",
-                known_emails=emails,
-            )
+            while not yahoo_query_done(repository, item.value, max_age_days=settings.feed_cursor_max_age_days):
+                emails = await next_page_emails(
+                    repository,
+                    item.value,
+                    min_followers=settings.min_followers,
+                    exclude_handles=exclude_handles,
+                    max_age_days=settings.feed_cursor_max_age_days,
+                )
+                if emails is None:
+                    break
+                exclude_handles.update(emails)
+                inserted += await scrape_handles(
+                    source,
+                    repository,
+                    notifier,
+                    handles=list(emails),
+                    niche=item.niche,
+                    min_followers=settings.min_followers,
+                    min_average_views=settings.min_average_views,
+                    found_via=f"yahoo:{item.value}",
+                    known_emails=emails,
+                )
+                await asyncio.sleep(1)
         elif item.kind == "search":
             inserted += await scrape_search(
                 source,

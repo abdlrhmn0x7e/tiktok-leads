@@ -20,7 +20,8 @@ from tiktok_leads.db import LeadRepository
 
 logger = logging.getLogger(__name__)
 
-PAGES_PER_QUERY = 5
+# 66 of 104 phrases still had results on page 4; a sample of 8 kept giving new creators to page 13.
+PAGES_PER_QUERY = 15
 # Yahoo serves 5 results a page; stepping by 7 skipped two of every seven.
 RESULTS_PER_PAGE = 5
 USER_AGENT = (
@@ -99,17 +100,18 @@ async def next_page_emails(
     min_followers: int,
     exclude_handles: set[str],
     max_age_days: int,
-) -> dict[str, str]:
+) -> dict[str, str] | None:
     """Fetch the query's next unread page and advance its cursor. Returns
     handle -> snippet email for unevaluated creators at or above
-    min_followers. A failed fetch leaves the cursor so the page reruns."""
+    min_followers. A failed fetch returns None and leaves the cursor so the
+    page reruns."""
     key = cursor_key(query)
     page = repository.get_feed_cursor(key, max_age_days=max_age_days)
     try:
         hits = parse_results(await asyncio.to_thread(fetch_page, query, page))
     except (subprocess.SubprocessError, RuntimeError):
         logger.exception("yahoo: failed to fetch %r page %s", query, page)
-        return {}
+        return None
     # A page with no TikTok results means the query ran out.
     repository.set_feed_cursor(key, page + 1 if hits else PAGES_PER_QUERY)
     usable = {
