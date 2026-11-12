@@ -261,15 +261,6 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     await self._feed_skip_delay()
                     continue
 
-                # Data for a zero-request views prefilter: 64% of video fetches end in "views below threshold".
-                author_stats = self._get(item, "authorStats", "author_stats", default={})
-                logger.info(
-                    "feed stats @%s hearts=%s videos=%s plays=%s",
-                    handle,
-                    self._get(author_stats, "heartCount", "heart", default=None),
-                    self._get(author_stats, "videoCount", default=None),
-                    self._get(self._get(item, "stats", default={}), "playCount", default=None),
-                )
                 result = await self._fetch_candidate(item, niche=niche, handle=handle, context=f"from #{tag}")
                 if result.profile is not None:
                     consecutive_blocked = 0
