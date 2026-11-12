@@ -727,8 +727,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
     async def _feed_skip_delay(self) -> None:
         # A prefiltered skip made no requests; a token pause just keeps feed
         # pagination from firing back-to-back when a whole page gets skipped.
-        # 0.2-0.8 s here was 39% of crawl wall time (2026-11-11, 369 min run).
-        await asyncio.sleep(random.uniform(0.05, 0.2))
+        await asyncio.sleep(random.uniform(0.2, 0.8))
 
     async def _recover_if_blocked(self, consecutive_blocked: int, *, context: str) -> bool:
         if consecutive_blocked < self.max_consecutive_blocked_profiles:
