@@ -83,3 +83,13 @@ def test_deleted_creator_is_returned_so_it_gets_recorded(monkeypatch):
             assert profile.handle == "gone" and profile.followers_count is None
 
     asyncio.run(run())
+
+
+def test_creator_from_a_hashtag_feed_gets_views_and_captions_from_the_embed_page(monkeypatch):
+    embed = EmbedProfile(handle="dan.swole", followers=1, bio="", views=[40_000, 20_000], captions=["leg day #gym", ""])
+    feed_item = {"author": {"uniqueId": "dan.swole", "signature": "Powerlifter dan@example.org"}, "authorStats": {"followerCount": 142_300}}
+    fetched = source(monkeypatch, lambda handle: embed)
+    result = asyncio.run(fetched._fetch_candidate(feed_item, niche="fitness", handle="dan.swole", context=""))
+    assert (result.profile.followers_count, result.profile.recent_video_views) == (142_300, [40_000, 20_000])
+    assert result.profile.recent_video_captions == ["leg day #gym", ""]
+    assert "gym" in result.profile.discovered_hashtags

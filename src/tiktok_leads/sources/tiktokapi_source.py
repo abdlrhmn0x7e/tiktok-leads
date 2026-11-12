@@ -270,9 +270,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     self._get(author_stats, "videoCount", default=None),
                     self._get(self._get(item, "stats", default={}), "playCount", default=None),
                 )
-                result = await self._fetch_candidate(
-                    api, item, niche=niche, handle=handle, context=f"from #{tag}"
-                )
+                result = await self._fetch_candidate(item, niche=niche, handle=handle, context=f"from #{tag}")
                 if result.profile is not None:
                     consecutive_blocked = 0
                     yield result.profile
@@ -341,10 +339,8 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     await self._feed_skip_delay()
                     continue
 
-                sec_uid = str(self._get(user_info, "sec_uid", "secUid", default="") or "").strip()
-                if followers is not None and bio is not None and sec_uid:
+                if followers is not None and bio is not None:
                     fetch = self._profile_from_videos(
-                        api.user(username=handle, sec_uid=sec_uid),
                         niche=niche,
                         handle=handle,
                         followers=followers,
@@ -550,25 +546,22 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
 
     async def _fetch_candidate(
         self,
-        api: TikTokApi,
         item: dict[str, Any],
         *,
         niche: str,
         handle: str,
         context: str,
     ) -> _Fetch:
-        """Fetch what the feed couldn't provide. When the feed already gave us
-        followers + bio + secUid, only the recent videos are missing — one
-        request instead of two."""
+        """Fetch what the feed couldn't provide: the recent videos when it
+        gave followers and bio, the whole profile otherwise. One embed-page
+        request either way."""
         author = self._get(item, "author", default={})
         stats = self._get(item, "authorStats", "author_stats", default={})
         followers = self._parse_int(self._get(stats, "followerCount", "follower_count", default=None))
         bio = self._get(author, "signature", default=None) if isinstance(author, dict) else None
-        sec_uid = str(self._get(author, "secUid", "sec_uid", default="") or "").strip()
-        if followers is not None and bio is not None and sec_uid:
+        if followers is not None and bio is not None:
             return await self._safe_fetch(
                 self._profile_from_videos(
-                    api.user(username=handle, sec_uid=sec_uid),
                     niche=niche,
                     handle=handle,
                     followers=followers,
@@ -612,7 +605,6 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
 
     async def _profile_from_videos(
         self,
-        user: Any,
         *,
         niche: str,
         handle: str,
@@ -637,7 +629,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     source="tiktokapi",
                     discovered_hashtags=sorted(feed_hashtags),
                 )
-        views, captions, hashtags = await self._collect_recent_videos(user)
+        views, captions, hashtags = await self._collect_recent_videos(handle)
         hashtags |= feed_hashtags
         return CandidateProfile(
             handle=handle,
@@ -701,21 +693,16 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             logger.info("found email via bio link for @%s: %s", handle, emails[0])
         return emails
 
-    async def _collect_recent_videos(self, user: Any) -> tuple[list[int], list[str], set[str]]:
-        views: list[int] = []
-        captions: list[str] = []
-        hashtags: set[str] = set()
-        # shortcut: counts one request per video fetch, true while recent_video_count fits one page (~30).
+    async def _collect_recent_videos(self, handle: str) -> tuple[list[int], list[str], set[str]]:
+        """Recent videos from the embed page, one unsigned request. The signed
+        user-videos call it replaces was refused for every creator from
+        2026-11-12 01:20."""
         self.request_count += 1
-        async for video in user.videos(count=self.recent_video_count):
-            video_data = video.as_dict
-            video_stats = self._get(video_data, "stats", default={})
-            play_count = self._parse_int(self._get(video_stats, "playCount", "play_count", default=None))
-            if play_count is not None:
-                views.append(play_count)
-            captions.append(str(self._get(video_data, "desc", default="") or ""))
-            hashtags.update(self._extract_hashtags(video_data))
-        return views, captions, hashtags
+        embed = await asyncio.to_thread(fetch_embed, handle)
+        if embed is None:
+            return [], [], set()
+        hashtags = {tag.lower() for caption in embed.captions for tag in _CAPTION_HASHTAG.findall(caption)}
+        return embed.views, embed.captions, hashtags
 
     async def _delay(self) -> None:
         delay = self.request_delay_seconds
