@@ -20,6 +20,7 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 )
 _STATE = re.compile(r'<script id="__FRONTITY_CONNECT_STATE__"[^>]*>(.*?)</script>', re.DOTALL)
+_SEC_UID = re.compile(r'"secUid":"([^"]+)"')
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class EmbedProfile:
     bio: str
     views: list[int]
     captions: list[str]
+    video_ids: list[str]
 
 
 def parse_embed(page: str) -> EmbedProfile | None:
@@ -50,6 +52,7 @@ def parse_embed(page: str) -> EmbedProfile | None:
             bio=str(user.get("signature") or ""),
             views=[int(video["playCount"]) for video in videos if video.get("playCount") is not None],
             captions=[str(video.get("desc") or "") for video in videos],
+            video_ids=[str(video["id"]) for video in videos if video.get("id")],
         )
     except (KeyError, StopIteration, TypeError) as error:
         raise ValueError(f"unexpected embed page state: {error!r}") from error
@@ -70,3 +73,28 @@ def fetch_embed(handle: str, *, timeout_seconds: float = 20.0, attempts: int = 4
         # 503 "overload-protect triggered" clears on a retry.
         time.sleep(2 * (attempt + 1))
     raise RuntimeError(f"embed page for @{handle} answered HTTP {status} {attempts} times")
+
+
+def parse_sec_uid(page: str) -> str:
+    """The author's secUid from a video page. Raises ValueError when the page
+    carries none (a block, or a changed page)."""
+    match = _SEC_UID.search(page)
+    if match is None:
+        raise ValueError("video page carries no secUid")
+    return match.group(1)
+
+
+def fetch_sec_uid(handle: str, *, timeout_seconds: float = 20.0) -> str | None:
+    """The secUid that TikTok's following-list API needs. The embed page has
+    none, but the page of any of the creator's videos does. None when the
+    creator is gone or has no videos."""
+    embed = fetch_embed(handle, timeout_seconds=timeout_seconds)
+    if embed is None or not embed.video_ids:
+        return None
+    response = requests.get(
+        f"https://www.tiktok.com/@{embed.handle}/video/{embed.video_ids[0]}",
+        headers={"User-Agent": USER_AGENT},
+        timeout=timeout_seconds,
+    )
+    response.raise_for_status()
+    return parse_sec_uid(response.text)

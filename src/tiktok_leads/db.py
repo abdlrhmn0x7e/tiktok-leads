@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import replace
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 from tiktok_leads.models import Lead
 from tiktok_leads.niches import is_harvestable_hashtag, trending_found_via
@@ -86,7 +88,31 @@ CREATE TABLE IF NOT EXISTS meta (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Creators from leads-hub whose following list gets crawled. Only 'due'
+-- seeds are crawled; cursor is the list's minCursor to resume from.
+CREATE TABLE IF NOT EXISTS following_seeds (
+    handle TEXT PRIMARY KEY,
+    niche TEXT NOT NULL,
+    sec_uid TEXT,
+    state TEXT NOT NULL DEFAULT 'due',
+    cursor INTEGER NOT NULL DEFAULT 0,
+    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
+
+# done: list exhausted. hidden: the creator hides it. failed: no secUid, or the list answered an error.
+FollowingState = Literal["due", "done", "hidden", "failed"]
+
+
+@dataclass(frozen=True)
+class FollowingSeed:
+    handle: str
+    niche: str
+    sec_uid: str | None
+    state: FollowingState
+    cursor: int
 
 
 class LeadRepository:
@@ -296,6 +322,40 @@ class LeadRepository:
                 updated_at = CURRENT_TIMESTAMP
             """,
             (feed, max(0, cursor)),
+        )
+        self.connection.commit()
+
+    def add_following_seeds(self, seeds: Iterable[tuple[str, str]]) -> None:
+        """(handle, niche) pairs. A seed already stored keeps its state, so a re-sync never re-crawls it."""
+        self.connection.executemany(
+            "INSERT OR IGNORE INTO following_seeds (handle, niche) VALUES (?, ?)", seeds
+        )
+        self.connection.commit()
+
+    def due_following_seeds(self, niche: str, *, limit: int) -> list[str]:
+        rows = self.connection.execute(
+            "SELECT handle FROM following_seeds WHERE niche = ? AND state = 'due' ORDER BY added_at LIMIT ?",
+            (niche, limit),
+        ).fetchall()
+        return [str(row["handle"]) for row in rows]
+
+    def following_seed(self, handle: str) -> FollowingSeed | None:
+        row = self.connection.execute(
+            "SELECT handle, niche, sec_uid, state, cursor FROM following_seeds WHERE handle = ?",
+            (handle,),
+        ).fetchone()
+        return FollowingSeed(**row) if row else None
+
+    def save_following_progress(
+        self, handle: str, *, sec_uid: str | None, cursor: int, state: FollowingState
+    ) -> None:
+        self.connection.execute(
+            """
+            UPDATE following_seeds
+            SET sec_uid = coalesce(?, sec_uid), cursor = ?, state = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE handle = ?
+            """,
+            (sec_uid, cursor, state, handle),
         )
         self.connection.commit()
 

@@ -29,6 +29,7 @@ def test_embed_page_gives_followers_bio_views_and_captions():
         bio="Powerlifter",
         views=[10000, 837400],
         captions=["squat PR #gym", ""],
+        video_ids=[],
     )
 
 
@@ -86,7 +87,7 @@ def test_deleted_creator_is_returned_so_it_gets_recorded(monkeypatch):
 
 
 def test_creator_from_a_hashtag_feed_gets_views_and_captions_from_the_embed_page(monkeypatch):
-    embed = EmbedProfile(handle="dan.swole", followers=1, bio="", views=[40_000, 20_000], captions=["leg day #gym", ""])
+    embed = EmbedProfile(handle="dan.swole", followers=1, bio="", views=[40_000, 20_000], captions=["leg day #gym", ""], video_ids=[])
     feed_item = {"author": {"uniqueId": "dan.swole", "signature": "Powerlifter dan@example.org"}, "authorStats": {"followerCount": 142_300}}
     fetched = source(monkeypatch, lambda handle: embed)
     result = asyncio.run(fetched._fetch_candidate(feed_item, niche="fitness", handle="dan.swole", context=""))

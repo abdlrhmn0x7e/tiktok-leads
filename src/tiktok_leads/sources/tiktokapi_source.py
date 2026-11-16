@@ -19,10 +19,12 @@ from TikTokApi.exceptions import (
 )
 
 from tiktok_leads.bio_links import bio_hints_link_page, emails_from_bio_links
+from tiktok_leads.db import FollowingState
 from tiktok_leads.email_extractor import extract_emails
 from tiktok_leads.models import CandidateProfile
+from tiktok_leads.niches import bio_on_niche
 from tiktok_leads.sources.base import TikTokSource
-from tiktok_leads.sources.embed import fetch_embed
+from tiktok_leads.sources.embed import fetch_embed, fetch_sec_uid
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,10 @@ _BLOCK_EXCEPTIONS = (EmptyResponseException, CaptchaException)
 # Consecutive feed-level (hashtag/search listing) block errors before we give
 # up the batch. Two in a row distinguishes a real block from one odd/banned tag.
 _MAX_FEED_BLOCK_STREAK = 2
+
+# The following-list API's statusCode when the creator hides who they follow
+# (about 2 in 3 creators on 2026-11-16).
+_FOLLOWING_LIST_HIDDEN = 10222
 
 
 class TikTokBlockedError(RuntimeError):
@@ -362,6 +368,121 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             blocked = await self._handle_feed_error(error, context=f"search '{query}'")
             if blocked:
                 raise TikTokBlockedError(f"feed requests blocked on search '{query}'") from error
+        finally:
+            if self.restart_session_between_hashtags and not blocked:
+                await self._restart_session()
+
+    async def profiles_from_following(
+        self,
+        seed: str,
+        *,
+        niche: str,
+        sec_uid: str | None,
+        cursor: int,
+        max_pages: int,
+        on_progress: Callable[[str | None, int, FollowingState], None],
+        exclude_handles: set[str] | None = None,
+        on_known: Callable[[str], None] | None = None,
+    ) -> AsyncIterable[CandidateProfile]:
+        """Creators `seed` follows, from `cursor` on, at most `max_pages`
+        pages. `on_progress` gets (sec_uid, cursor to resume from, state)
+        after each fully consumed page; a feed error reports nothing, so the
+        seed stays due."""
+        api = self._api()
+        context = f"@{seed}'s following list"
+        excluded = {handle.removeprefix("@").lower() for handle in exclude_handles or set()}
+        seen_handles: set[str] = set()
+        consecutive_blocked = 0
+        blocked = False
+        try:
+            if sec_uid is None:
+                self.request_count += 2  # embed page + video page
+                sec_uid = await asyncio.to_thread(fetch_sec_uid, seed)
+                if sec_uid is None:
+                    logger.info("no following list for @%s: creator gone or has no videos", seed)
+                    on_progress(None, cursor, "failed")
+                    return
+                on_progress(sec_uid, cursor, "due")
+            for page in range(max_pages):
+                if page:
+                    await self._delay()
+                self.request_count += 1
+                resp = await api.make_request(
+                    url="https://www.tiktok.com/api/user/list/",
+                    params={"secUid": sec_uid, "scene": 21, "count": 30, "minCursor": cursor, "maxCursor": 0},
+                )
+                if resp is None:
+                    raise InvalidResponseException(resp, "TikTok returned an invalid response.")
+                status = self._parse_int(resp.get("statusCode"))
+                if status == _FOLLOWING_LIST_HIDDEN:
+                    logger.info("@%s hides who they follow", seed)
+                    on_progress(sec_uid, cursor, "hidden")
+                    return
+                if status != 0:
+                    logger.warning("%s answered statusCode %s", context, status)
+                    on_progress(sec_uid, cursor, "failed")
+                    return
+                self._feed_block_streak = 0
+                users = resp.get("userList", []) or []
+                for entry in users:
+                    user = self._get(entry, "user", default={})
+                    stats = self._get(entry, "stats", default={})
+                    handle = str(self._get(user, "uniqueId", default="")).strip()
+                    normalized_handle = handle.removeprefix("@").lower()
+                    if not handle or normalized_handle in seen_handles:
+                        continue
+                    if normalized_handle in excluded:
+                        logger.info("skipping @%s from %s: handle already evaluated", handle, context)
+                        if on_known is not None:
+                            on_known(normalized_handle)
+                        continue
+                    seen_handles.add(normalized_handle)
+
+                    followers = self._parse_int(self._get(stats, "followerCount", default=None))
+                    bio = self._get(user, "signature", default=None)
+                    prefiltered = self._prefiltered_candidate(
+                        niche=niche, handle=handle, followers=followers, bio=bio
+                    )
+                    if prefiltered is not None:
+                        yield prefiltered
+                        await self._feed_skip_delay()
+                        continue
+                    # Left unrecorded: it was not evaluated, and a hashtag crawl may still reach it.
+                    if not bio_on_niche(niche, str(bio or "")):
+                        logger.info("skipping @%s from %s: bio is not about %s", handle, context, niche)
+                        continue
+
+                    if followers is not None and bio is not None:
+                        fetch = self._profile_from_videos(
+                            niche=niche,
+                            handle=handle,
+                            followers=followers,
+                            bio=str(bio),
+                            feed_hashtags=set(),
+                        )
+                    else:
+                        fetch = self._profile_from_user(handle, niche=niche)
+                    result = await self._safe_fetch(fetch, handle=handle, context=f"from {context}")
+                    if result.profile is not None:
+                        consecutive_blocked = 0
+                        yield result.profile
+                    elif result.blocked:
+                        consecutive_blocked += 1
+                        if await self._recover_if_blocked(consecutive_blocked, context=context):
+                            blocked = True
+                            raise TikTokBlockedError(f"sustained TikTok blocking on {context}")
+                    await self._delay()
+                cursor = self._parse_int(resp.get("minCursor")) or 0
+                has_more = bool(resp.get("hasMore", False)) and bool(users) and cursor != 0
+                on_progress(sec_uid, cursor, "due" if has_more else "done")
+                if not has_more:
+                    return
+        except TikTokBlockedError:
+            raise
+        except Exception as error:
+            blocked = await self._handle_feed_error(error, context=context)
+            if blocked:
+                raise TikTokBlockedError(f"feed requests blocked on {context}") from error
         finally:
             if self.restart_session_between_hashtags and not blocked:
                 await self._restart_session()

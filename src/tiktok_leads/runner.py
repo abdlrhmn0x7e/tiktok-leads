@@ -130,6 +130,44 @@ async def scrape_search(
     )
 
 
+async def scrape_following(
+    source: TikTokSource,
+    repository: LeadRepository,
+    notifier: Notifier,
+    *,
+    seed: str,
+    max_pages: int,
+    min_followers: int,
+    min_average_views: int,
+    exclude_handles: set[str] | None = None,
+) -> int:
+    current = repository.following_seed(seed)
+    # A blocked cycle re-queues its whole batch, so a seed finished earlier in it comes back.
+    if current is None or current.state != "due":
+        return 0
+    found_via = f"following:@{seed}"
+    logger.info("crawling who @%s follows for niche=%s cursor=%s", seed, current.niche, current.cursor)
+    return await _process_candidates(
+        source.profiles_from_following(
+            seed,
+            niche=current.niche,
+            sec_uid=current.sec_uid,
+            cursor=current.cursor,
+            max_pages=max_pages,
+            on_progress=lambda sec_uid, cursor, state: repository.save_following_progress(
+                seed, sec_uid=sec_uid, cursor=cursor, state=state
+            ),
+            # No on_known: popular creators are followed by many seeds, and each would add a source to the lead.
+            exclude_handles=exclude_handles,
+        ),
+        repository,
+        notifier,
+        min_followers=min_followers,
+        min_average_views=min_average_views,
+        found_via=found_via,
+    )
+
+
 def is_exhausted(repository: LeadRepository, kind: str, value: str) -> bool:
     return (
         repository.get_feed_cursor(_exhausted_key(kind, value), max_age_days=EXHAUSTED_DAYS[kind])

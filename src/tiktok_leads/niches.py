@@ -539,6 +539,12 @@ def is_on_niche(niche: str, bio: str, captions: Sequence[str]) -> bool:
     return hits >= 3 or (hits >= 1 and bool(terms.search(bio)))
 
 
+def bio_on_niche(niche: str, bio: str) -> bool:
+    """Whether the bio uses `niche`'s words. Niches without a word list pass."""
+    terms = CONTENT_TERMS.get(niche.strip().lower())
+    return terms is None or bool(terms.search(bio))
+
+
 def hashtags_for_niche(niche: str) -> tuple[str, ...]:
     return _crawlable(niche, NICHE_HASHTAGS)
 

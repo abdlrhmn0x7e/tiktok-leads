@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterable, Callable, Iterable
 
+from tiktok_leads.db import FollowingState
 from tiktok_leads.models import CandidateProfile
 
 
@@ -41,5 +42,20 @@ class TikTokSource(ABC):
         exclude_handles: set[str] | None = None,
         on_known: Callable[[str], None] | None = None,
         on_finished: Callable[[int], None] | None = None,
+    ) -> AsyncIterable[CandidateProfile]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def profiles_from_following(
+        self,
+        seed: str,
+        *,
+        niche: str,
+        sec_uid: str | None,
+        cursor: int,
+        max_pages: int,
+        on_progress: Callable[[str | None, int, FollowingState], None],
+        exclude_handles: set[str] | None = None,
+        on_known: Callable[[str], None] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         raise NotImplementedError

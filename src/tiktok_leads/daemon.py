@@ -25,6 +25,7 @@ from tiktok_leads.notifiers import Notifier
 from tiktok_leads.runner import (
     EXHAUSTED_DAYS,
     is_exhausted,
+    scrape_following,
     scrape_handles,
     scrape_hashtag,
     scrape_search,
@@ -40,9 +41,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class WorkItem:
-    kind: str  # "hashtag" | "search" | "recheck" | "yahoo"
+    kind: str  # "hashtag" | "search" | "recheck" | "yahoo" | "following"
     niche: str
-    value: str  # hashtag, search phrase, handle, or Yahoo query
+    value: str  # hashtag, search phrase, handle (recheck, or following seed), or Yahoo query
     harvested: bool = False  # hashtag came from the harvesting flywheel
     trending: bool = False  # from TRENDING_HASHTAGS / TRENDING_SEARCH_TERMS
 
@@ -55,6 +56,8 @@ class WorkItem:
             return f"search:{self.value!r}{trend}({self.niche})"
         if self.kind == "yahoo":
             return f"yahoo:{self.value!r}({self.niche})"
+        if self.kind == "following":
+            return f"following:@{self.value}({self.niche})"
         return f"recheck:@{self.value}({self.niche})"
 
 
@@ -117,6 +120,19 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
     for term, niche in fetch_search_terms(settings):
         add(WorkItem("search", niche, term))
 
+    if settings.discovery_following_enabled:
+        daemon_niches = {niche.lower(): niche for niche in niches}
+        repository.add_following_seeds(
+            (handle, daemon_niches[niche])
+            for handle, niche in fetch_following_seeds(settings)
+            if niche in daemon_niches
+        )
+        for niche in niches:
+            for handle in repository.due_following_seeds(
+                niche, limit=settings.discovery_following_seeds_per_sweep
+            ):
+                add(WorkItem("following", niche, handle))
+
     if settings.recheck_enabled:
         for handle, handle_niche in repository.handles_due_for_recheck(
             niches=niches,
@@ -142,8 +158,9 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
 
     items.extend(_trending_slots(trending, general_count=len(items), share=settings.daemon_trending_share))
     random.shuffle(items)
-    # Yahoo gave 0.59 leads/min against 0.26 for hashtag crawls (2026-11-11), so it runs first (the queue pops from the end).
-    items.sort(key=lambda item: item.kind == "yahoo")
+    # Yahoo gave 0.59 leads/min against 0.26 for hashtag crawls (2026-11-11) and following lists
+    # gave 7 leads in 13 min (2026-11-16), so they run first (the queue pops from the end).
+    items.sort(key=lambda item: item.kind in ("yahoo", "following"))
     return items
 
 
@@ -165,6 +182,28 @@ def fetch_search_terms(settings: Settings) -> list[tuple[str, str]]:
         ]
     except Exception:
         logger.exception("daemon: failed to fetch search terms from Convex; skipping them this sweep")
+        return []
+
+
+def fetch_following_seeds(settings: Settings) -> list[tuple[str, str]]:
+    """(handle, niche) pairs: creators the outreach team submitted or emailed
+    in leads-hub. Same failure behavior as fetch_search_terms."""
+    if not settings.convex_site_url or not settings.convex_ingest_api_key:
+        return []
+    try:
+        response = requests.get(
+            f"{settings.convex_site_url.rstrip('/')}/scraper/following-seeds",
+            headers={"Authorization": f"Bearer {settings.convex_ingest_api_key}"},
+            timeout=20,
+        )
+        response.raise_for_status()
+        seeds = [
+            (str(row["handle"]).strip().removeprefix("@").lower(), str(row["niche"]).strip().lower())
+            for row in response.json()["seeds"]
+        ]
+        return [(handle, niche) for handle, niche in seeds if handle]
+    except Exception:
+        logger.exception("daemon: failed to fetch following seeds from Convex; skipping them this sweep")
         return []
 
 
@@ -415,6 +454,17 @@ async def _run_batch(
                     known_emails=emails,
                 )
                 await asyncio.sleep(1)
+        elif item.kind == "following":
+            inserted += await scrape_following(
+                source,
+                repository,
+                notifier,
+                seed=item.value,
+                max_pages=settings.discovery_following_pages_per_visit,
+                min_followers=settings.min_followers,
+                min_average_views=settings.min_average_views,
+                exclude_handles=exclude_handles,
+            )
         elif item.kind == "search":
             inserted += await scrape_search(
                 source,

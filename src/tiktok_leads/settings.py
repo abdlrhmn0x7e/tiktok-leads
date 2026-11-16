@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     discovery_harvested_recrawl_after_days: int = 7  # don't re-crawl a harvested tag sooner
     discovery_use_search: bool = True  # crawl api.search.users for niche phrases
     discovery_search_results_per_term: int = 20  # users requested per search phrase
+    discovery_following_enabled: bool = True  # crawl who leads-hub's seed creators follow
+    discovery_following_seeds_per_sweep: int = 30  # due seeds queued per niche per sweep
+    discovery_following_pages_per_visit: int = 6  # 30 accounts a page; the rest waits for the next sweep
     # Hashtag feed cursors: resume each crawl where the last one stopped instead
     # of re-reading the (mostly already-evaluated) head of the feed. A cursor
     # older than this restarts from the top to pick up new videos; 0 disables
