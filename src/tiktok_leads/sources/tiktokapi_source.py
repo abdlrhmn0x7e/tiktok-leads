@@ -444,8 +444,8 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                         niche=niche, handle=handle, followers=followers, bio=bio
                     )
                     if prefiltered is not None:
+                        # No pause: the skip made no request, and list pages stay a full delay apart.
                         yield prefiltered
-                        await self._feed_skip_delay()
                         continue
                     # Left unrecorded: it was not evaluated, and a hashtag crawl may still reach it.
                     if not bio_on_niche(niche, str(bio or "")):
