@@ -303,6 +303,15 @@ class LeadRepository:
         ).fetchall()
         return [(str(row["handle"]), str(row["niche"])) for row in rows]
 
+    def mark_rechecked(self, handle: str) -> None:
+        """A renamed creator is recorded under the new handle, so the old one
+        would stay due for a recheck forever."""
+        self.connection.execute(
+            "UPDATE scraped_profiles SET last_seen_at = CURRENT_TIMESTAMP WHERE handle = ?",
+            (handle.removeprefix("@").lower(),),
+        )
+        self.connection.commit()
+
     def get_feed_cursor(self, feed: str, *, max_age_days: int) -> int:
         """Where to resume a feed crawl. Stale cursors fall back to 0 so we
         periodically re-read the head of the feed, where new videos land."""

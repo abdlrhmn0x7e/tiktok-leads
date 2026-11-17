@@ -199,3 +199,15 @@ def test_sec_uid_comes_from_the_video_page():
     assert parse_sec_uid(snippet) == "MS4wLjABAAAAx-9_k"
     with pytest.raises(ValueError):
         parse_sec_uid("<html>captcha</html>")
+
+
+def test_recheck_of_a_renamed_handle_is_not_due_again(tmp_path):
+    repository = LeadRepository(tmp_path / "leads.sqlite")
+    repository.initialize()
+    repository.connection.execute(
+        "INSERT INTO scraped_profiles (handle, niche, source, skip_reason, last_seen_at)"
+        " VALUES ('oldname', 'fitness', 'tiktokapi', 'no_email', datetime('now', '-30 days'))"
+    )
+    assert repository.handles_due_for_recheck(niches=["fitness"], after_days=7, limit=5) == [("oldname", "fitness")]
+    repository.mark_rechecked("@OldName")
+    assert repository.handles_due_for_recheck(niches=["fitness"], after_days=7, limit=5) == []

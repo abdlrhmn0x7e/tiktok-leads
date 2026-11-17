@@ -427,6 +427,7 @@ async def _run_batch(
                 min_average_views=settings.min_average_views,
                 found_via="recheck",
             )
+            repository.mark_rechecked(item.value)
             continue
 
         exclude_handles = repository.excluded_handles(settings.recheck_after_days)
