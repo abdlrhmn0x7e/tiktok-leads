@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from tiktok_leads.email_extractor import extract_emails
 from tiktok_leads.models import CandidateProfile, Lead
-from tiktok_leads.niches import is_on_niche
+from tiktok_leads.niches import is_on_niche, rejected_group
 from tiktok_leads.numbers import floor_view_count
 
 
@@ -62,6 +62,14 @@ def evaluate_candidate(
         return LeadEvaluation(
             lead=None,
             skip_reason=f"bio and recent captions are not about {candidate.niche}",
+            skip_code="off_niche",
+        )
+
+    group = rejected_group(candidate.niche, candidate.bio, candidate.recent_video_captions, emails[0])
+    if group is not None:
+        return LeadEvaluation(
+            lead=None,
+            skip_reason=f"reviewers reject this group ({group})",
             skip_code="off_niche",
         )
 

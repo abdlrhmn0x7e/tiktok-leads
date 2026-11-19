@@ -539,6 +539,43 @@ def is_on_niche(niche: str, bio: str, captions: Sequence[str]) -> bool:
     return hits >= 3 or (hits >= 1 and bool(terms.search(bio)))
 
 
+# Groups reviewers kept under 16% of, against 28% overall (324 reviewed leads, 2026-11-17..18).
+_SPORT = r"run|running|runners?|marathon\w*|hyrox|boxing|mma|football|soccer|basketball|cycling|triathl\w*"
+_FOOD = (
+    r"recipes?|meal ?prep|protein (?:balls?|bars?|shakes?|pancakes?)|cook\w*|bak(?:e|ed|ing)"
+    r"|ingredients?|delicious|tasty|breakfast|dinner|snacks?"
+)
+_FAMILY = (
+    r"mom(?:s|my|mies|life)?|mum(?:s|my)?|toddlers?|baby|husband|wife|vlogs?|grwm|day in my life"
+    r"|outfits?|makeup|skincare"
+)
+REJECTED_GROUPS: dict[str, dict[str, re.Pattern[str]]] = {
+    "fitness": {
+        "sport": re.compile(rf"(?i)(?<![a-z])(?:{_SPORT})(?![a-z])"),
+        "food": re.compile(rf"(?i)(?<![a-z])(?:{_FOOD})(?![a-z])"),
+        "family or lifestyle": re.compile(rf"(?i)(?<![a-z])(?:{_FAMILY})(?![a-z])"),
+    },
+}
+_COUNTRY_EMAIL = re.compile(r"(?i)\.(?:uk|de|nl|fr|pl|es|it|au|ie|se|dk|no|cz|be|at|ch|br|mx)$")
+
+
+def rejected_group(niche: str, bio: str, captions: Sequence[str], email: str) -> str | None:
+    """The group reviewers reject this creator with, if any: a sport, food, or
+    family word in the bio, a sport or food word in two recent captions, or an
+    email on a country domain."""
+    groups = REJECTED_GROUPS.get(niche.strip().lower())
+    if groups is None:
+        return None
+    if _COUNTRY_EMAIL.search(email.strip()):
+        return "email on a country domain"
+    texts = [re.sub(r"#\S+", "", caption) for caption in captions]
+    for name, terms in groups.items():
+        in_captions = name != "family or lifestyle" and sum(bool(terms.search(text)) for text in texts) >= 2
+        if terms.search(bio) or in_captions:
+            return name
+    return None
+
+
 def bio_on_niche(niche: str, bio: str) -> bool:
     """Whether the bio uses `niche`'s words. Niches without a word list pass."""
     terms = CONTENT_TERMS.get(niche.strip().lower())

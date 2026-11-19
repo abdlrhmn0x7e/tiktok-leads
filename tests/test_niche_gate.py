@@ -62,3 +62,18 @@ def test_only_gym_hashtags_are_crawled_for_fitness():
         assert is_harvestable_hashtag(tag, "fitness"), tag
     for tag in ("fitjeans", "officefits", "dogtraining", "lashliftandtint", "hauslabs", "glutenfree", "beachyoga"):
         assert not is_harvestable_hashtag(tag, "fitness"), tag
+
+
+def test_groups_reviewers_reject_are_named():
+    from tiktok_leads.niches import rejected_group
+
+    gym = ["Leg day with heavy squats", "My top 3 tricep exercises", "Glute workout"]
+    assert rejected_group("fitness", "Online fitness coach", gym, "coach@gmail.com") is None
+    assert rejected_group("fitness", "Online fitness coach", gym, "coach@hotmail.co.uk") == "email on a country domain"
+    assert rejected_group("fitness", "Fitness | mom of 3", gym, "a@gmail.com") == "family or lifestyle"
+    assert rejected_group("fitness", "Gym and marathon training", gym, "a@gmail.com") == "sport"
+    recipes = ["High protein recipe", "Easy dinner for the week", "Leg day"]
+    assert rejected_group("fitness", "Gym girl", recipes, "a@gmail.com") == "food"
+    # One food caption is not enough, and words inside other words do not count.
+    assert rejected_group("fitness", "Momentum fitness, summa cum laude", gym + ["My dinner"], "a@gmail.com") is None
+    assert rejected_group("mom", "mom of 3", recipes, "a@x.co.uk") is None
