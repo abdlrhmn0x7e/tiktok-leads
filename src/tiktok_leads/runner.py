@@ -159,6 +159,7 @@ async def scrape_following(
             ),
             # No on_known: popular creators are followed by many seeds, and each would add a source to the lead.
             exclude_handles=exclude_handles,
+            on_seed=lambda handle, sec_uid: repository.add_found_seed(handle, current.niche, sec_uid),
         ),
         repository,
         notifier,

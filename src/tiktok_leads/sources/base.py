@@ -57,5 +57,6 @@ class TikTokSource(ABC):
         on_progress: Callable[[str | None, int, FollowingState], None],
         exclude_handles: set[str] | None = None,
         on_known: Callable[[str], None] | None = None,
+        on_seed: Callable[[str, str | None], None] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         raise NotImplementedError

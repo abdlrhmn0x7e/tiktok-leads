@@ -22,7 +22,7 @@ from tiktok_leads.bio_links import bio_hints_link_page, emails_from_bio_links
 from tiktok_leads.db import FollowingState
 from tiktok_leads.email_extractor import extract_emails
 from tiktok_leads.models import CandidateProfile
-from tiktok_leads.niches import bio_on_niche
+from tiktok_leads.niches import bio_on_niche, rejected_group
 from tiktok_leads.sources.base import TikTokSource
 from tiktok_leads.sources.embed import fetch_embed, fetch_sec_uid
 
@@ -383,11 +383,13 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         on_progress: Callable[[str | None, int, FollowingState], None],
         exclude_handles: set[str] | None = None,
         on_known: Callable[[str], None] | None = None,
+        on_seed: Callable[[str, str | None], None] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         """Creators `seed` follows, from `cursor` on, at most `max_pages`
         pages. `on_progress` gets (sec_uid, cursor to resume from, state)
         after each fully consumed page; a feed error reports nothing, so the
-        seed stays due."""
+        seed stays due. `on_seed` gets (handle, sec_uid) of each public
+        creator worth crawling in turn, with or without an email."""
         api = self._api()
         context = f"@{seed}'s following list"
         excluded = {handle.removeprefix("@").lower() for handle in exclude_handles or set()}
@@ -431,6 +433,16 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     normalized_handle = handle.removeprefix("@").lower()
                     if not handle or normalized_handle in seen_handles:
                         continue
+                    followers = self._parse_int(self._get(stats, "followerCount", default=None))
+                    bio = self._get(user, "signature", default=None)
+                    if (
+                        on_seed is not None
+                        and (followers or 0) >= self.min_followers
+                        and not self._get(user, "privateAccount", default=False)
+                        and bio_on_niche(niche, str(bio or ""))
+                        and rejected_group(niche, str(bio or ""), [], "") is None
+                    ):
+                        on_seed(normalized_handle, self._get(user, "secUid", default=None) or None)
                     if normalized_handle in excluded:
                         logger.info("skipping @%s from %s: handle already evaluated", handle, context)
                         if on_known is not None:
@@ -438,8 +450,6 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                         continue
                     seen_handles.add(normalized_handle)
 
-                    followers = self._parse_int(self._get(stats, "followerCount", default=None))
-                    bio = self._get(user, "signature", default=None)
                     prefiltered = self._prefiltered_candidate(
                         niche=niche, handle=handle, followers=followers, bio=bio
                     )

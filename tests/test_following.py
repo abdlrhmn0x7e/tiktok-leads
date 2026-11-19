@@ -171,7 +171,7 @@ def test_visit_stops_at_its_page_cap_and_the_next_resumes_there(monkeypatch, tmp
 
     repository.add_following_seeds([(SEED, "fitness")])
     assert repository.following_seed(SEED).state == "done"
-    assert repository.due_following_seeds("fitness", limit=30) == []
+    assert repository.due_following_seeds("fitness", limit=30) == ["rest.day"]  # found in the list
 
 
 def test_blocked_list_leaves_the_seed_due_at_its_cursor(monkeypatch, tmp_path):
@@ -211,3 +211,25 @@ def test_recheck_of_a_renamed_handle_is_not_due_again(tmp_path):
     assert repository.handles_due_for_recheck(niches=["fitness"], after_days=7, limit=5) == [("oldname", "fitness")]
     repository.mark_rechecked("@OldName")
     assert repository.handles_due_for_recheck(niches=["fitness"], after_days=7, limit=5) == []
+
+
+def test_on_niche_creators_in_a_list_become_seeds_behind_leads_hub_ones(monkeypatch, tmp_path):
+    repository = seeded_repository(tmp_path)
+    api = FakeApi(
+        page(
+            account("gymcoach", 50_000, "Online fitness coach"),  # no email: still a seed
+            account("smallgym", 900, "Gym rat"),
+            account("gymmom", 50_000, "Fitness | mom of 3"),
+            account("painter", 50_000, "I paint"),
+        )
+    )
+    crawl(monkeypatch, repository, api)
+    rows = repository.connection.execute(
+        "SELECT handle, sec_uid, level FROM following_seeds WHERE handle != ?", (SEED,)
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [("gymcoach", "MS4w-gymcoach", 2)]
+
+    repository.add_following_seeds([("hubseed", "fitness"), ("gymcoach", "fitness")])
+    repository.connection.execute("UPDATE following_seeds SET added_at = '2030-01-01' WHERE handle = 'hubseed'")
+    repository.add_found_seed("later", "fitness", None)
+    assert repository.due_following_seeds("fitness", limit=5) == ["gymcoach", "hubseed", "later"]

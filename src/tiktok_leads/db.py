@@ -98,7 +98,9 @@ CREATE TABLE IF NOT EXISTS following_seeds (
     state TEXT NOT NULL DEFAULT 'due',
     cursor INTEGER NOT NULL DEFAULT 0,
     added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- 1: a lead from leads-hub. 2: an on-niche creator found in a seed's list.
+    level INTEGER NOT NULL DEFAULT 1
 );
 """
 
@@ -129,9 +131,15 @@ class LeadRepository:
         self._migrate_scraped_profiles_handle_unique()
         self._migrate_add_scraped_profiles_skip_reason()
         self._migrate_add_scraped_profiles_found_via()
+        self._migrate_add_following_seeds_level()
         self._backfill_scraped_profiles_from_influencers()
         self._backfill_lead_sources()
         self.connection.commit()
+
+    def _migrate_add_following_seeds_level(self) -> None:
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(following_seeds)")}
+        if "level" not in columns:
+            self.connection.execute("ALTER TABLE following_seeds ADD COLUMN level INTEGER NOT NULL DEFAULT 1")
 
     def _migrate_add_influencers_platform(self) -> None:
         columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(influencers)")}
@@ -337,13 +345,23 @@ class LeadRepository:
     def add_following_seeds(self, seeds: Iterable[tuple[str, str]]) -> None:
         """(handle, niche) pairs. A seed already stored keeps its state, so a re-sync never re-crawls it."""
         self.connection.executemany(
-            "INSERT OR IGNORE INTO following_seeds (handle, niche) VALUES (?, ?)", seeds
+            "INSERT INTO following_seeds (handle, niche) VALUES (?, ?) "
+            "ON CONFLICT(handle) DO UPDATE SET level = 1",
+            seeds,
+        )
+        self.connection.commit()
+
+    def add_found_seed(self, handle: str, niche: str, sec_uid: str | None) -> None:
+        """An on-niche creator found in a seed's list. Crawled after every leads-hub seed."""
+        self.connection.execute(
+            "INSERT OR IGNORE INTO following_seeds (handle, niche, sec_uid, level) VALUES (?, ?, ?, 2)",
+            (handle.removeprefix("@").lower(), niche, sec_uid),
         )
         self.connection.commit()
 
     def due_following_seeds(self, niche: str, *, limit: int) -> list[str]:
         rows = self.connection.execute(
-            "SELECT handle FROM following_seeds WHERE niche = ? AND state = 'due' ORDER BY added_at LIMIT ?",
+            "SELECT handle FROM following_seeds WHERE niche = ? AND state = 'due' ORDER BY level, added_at LIMIT ?",
             (niche, limit),
         ).fetchall()
         return [str(row["handle"]) for row in rows]
