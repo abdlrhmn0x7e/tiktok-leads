@@ -62,6 +62,11 @@ def test_only_gym_hashtags_are_crawled_for_fitness():
         assert is_harvestable_hashtag(tag, "fitness"), tag
     for tag in ("fitjeans", "officefits", "dogtraining", "lashliftandtint", "hauslabs", "glutenfree", "beachyoga"):
         assert not is_harvestable_hashtag(tag, "fitness"), tag
+    # Food, sport and family tags reach creators reviewers reject, even with a gym word in them.
+    for tag in ("gymrecipes", "proteinpancakes", "runnerworkout", "hyroxtraining", "fitmom", "crossfitgames"):
+        assert not is_harvestable_hashtag(tag, "fitness"), tag
+    for tag in ("gymmomentum", "maximumgym", "crunchworkout"):
+        assert is_harvestable_hashtag(tag, "fitness"), tag
 
 
 def test_groups_reviewers_reject_are_named():

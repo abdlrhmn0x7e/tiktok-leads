@@ -41,10 +41,7 @@ NICHE_HASHTAGS: dict[str, tuple[str, ...]] = {
         "hypertrophy",
         "weightlifting",
         "powerlifting",
-        "crossfit",
-        "hyrox",
         "hybridathlete",
-        "marathontraining",
         "mobility",
         "fatloss",
         "fatlosstips",
@@ -484,8 +481,20 @@ HARVEST_STEMS: dict[str, tuple[str, ...]] = {
     "fitness": (
         "gym", "fitness", "fittok", "fitfam", "workout", "lifting", "weightlift", "deadlift",
         "trainer", "muscle", "glute", "legday", "bicep", "pilates", "calisthenic", "bodybuild",
-        "powerlift", "crossfit", "hyrox", "running", "runner", "strength", "cardio", "hiit",
-        "weightloss", "fatloss", "protein", "macro", "calorie", "mealprep", "nutrition",
+        "powerlift", "strength", "cardio", "hiit",
+        "weightloss", "fatloss", "macro", "calorie", "nutrition",
+    ),
+}
+
+# Reviewed 2026-11-19 against leads-hub verdicts since 11-12: "protein", "mealprep",
+# "running", "runner", "crossfit" and "hyrox" tags took 1,000 of 4,300 crawl minutes for
+# about 2 kept leads an hour, against 5 or more for "gym" and "workout" tags. Tags with a
+# food, sport or family word feed creators `rejected_group` skips anyway.
+HARVEST_EXCLUDED: dict[str, re.Pattern[str]] = {
+    "fitness": re.compile(
+        r"recipe|meal|food|cook|bake|snack|breakfast|dinner|lunch|vegan|keto|whatieat|protein"
+        r"|running|runner|marathon|hyrox|crossfit|boxing|football|soccer|triathl"
+        r"|mom(?!ent)|(?<!maxi)mum|baby|pregnan|postpartum"
     ),
 }
 
@@ -498,6 +507,9 @@ def is_harvestable_hashtag(tag: str, niche: str | None = None) -> bool:
     stems = HARVEST_STEMS.get((niche or "").strip().lower())
     # "gluten" contains the "glute" stem but is food, not fitness.
     on_niche = not stems or any(stem in tag.replace("gluten", "") for stem in stems)
+    excluded = HARVEST_EXCLUDED.get((niche or "").strip().lower())
+    if excluded is not None and excluded.search(tag):
+        return False
     return (
         len(tag) >= 3
         and not tag.isdigit()
