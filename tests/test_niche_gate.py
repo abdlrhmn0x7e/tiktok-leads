@@ -67,6 +67,10 @@ def test_only_gym_hashtags_are_crawled_for_fitness():
         assert not is_harvestable_hashtag(tag, "fitness"), tag
     for tag in ("gymmomentum", "maximumgym", "crunchworkout"):
         assert is_harvestable_hashtag(tag, "fitness"), tag
+    for tag in ("squat", "benchpress", "chestday", "pushday", "physique", "strongwomen", "kettlebell"):
+        assert is_harvestable_hashtag(tag, "fitness"), tag
+    for tag in ("drsquatch", "homebargains"):
+        assert not is_harvestable_hashtag(tag, "fitness"), tag
 
 
 def test_groups_reviewers_reject_are_named():

@@ -4,9 +4,11 @@ import argparse
 import asyncio
 import logging
 import random
+from pathlib import Path
 
 import requests
 
+from tiktok_leads.apify_instagram import read_handles
 from tiktok_leads.daemon import run_daemon
 from tiktok_leads.db import LeadRepository
 from tiktok_leads.factory import build_proxy_provider, build_source
@@ -26,6 +28,11 @@ async def async_main() -> None:
     parser = argparse.ArgumentParser(description="Find TikTok leads and store them in SQLite.")
     parser.add_argument("--niche", help="Niche label, e.g. mom, fitness, lifestyle, grwm")
     parser.add_argument("--handle", action="append", default=[], help="TikTok handle to inspect")
+    parser.add_argument(
+        "--handles-file",
+        type=Path,
+        help="TikTok handles to inspect, one per line; already-checked ones are skipped, so re-run to continue",
+    )
     parser.add_argument("--hashtag", action="append", default=[], help="TikTok hashtag to crawl")
     parser.add_argument("--limit", type=int, default=30, help="New (not yet evaluated) creators to inspect per hashtag")
     parser.add_argument("--init-db", action="store_true", help="Only initialize the SQLite schema")
@@ -119,14 +126,25 @@ async def async_main() -> None:
             repository.close()
         return
 
-    hashtags = args.hashtag or [*hashtags_for_niche(args.niche), *trending_hashtags_for_niche(args.niche)]
+    if args.handles_file:
+        seen = repository.seen_handles()
+        listed = read_handles(args.handles_file)
+        args.handle += [handle for handle in listed if handle not in seen]
+        logging.info("%s of %s listed handle(s) not checked yet", len(args.handle), len(listed))
+    # Handles alone mean "check these"; the niche's preset hashtags only run without them.
+    presets = (
+        []
+        if args.handle or args.handles_file
+        else [*hashtags_for_niche(args.niche), *trending_hashtags_for_niche(args.niche)]
+    )
+    hashtags = args.hashtag or presets
     if settings.shuffle_hashtags and not args.hashtag:
         random.shuffle(hashtags)
-    if not args.handle and not hashtags:
+    if not args.handle and not hashtags and not args.handles_file:
         parser.error("provide at least one --handle or --hashtag, or use a configured niche")
     if args.hashtag:
         logging.info("using explicit hashtag(s): %s", ", ".join(f"#{tag.removeprefix('#')}" for tag in hashtags))
-    else:
+    elif hashtags:
         logging.info("using preset hashtag(s) for niche=%s: %s", args.niche, ", ".join(f"#{tag}" for tag in hashtags))
 
     notifier = build_notifier(settings)

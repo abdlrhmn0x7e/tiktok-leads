@@ -1,0 +1,622 @@
+{
+"#absworkout": {
+"kept": 7,
+"rejected": 2
+},
+"#abworkout": {
+"kept": 24,
+"rejected": 7
+},
+"#aestheticeats": {
+"kept": 11,
+"rejected": 38
+},
+"#armworkout": {
+"kept": 14,
+"rejected": 3
+},
+"#backday": {
+"kept": 8,
+"rejected": 1
+},
+"#backworkout": {
+"kept": 7,
+"rejected": 6
+},
+"#beginnergymworkout": {
+"kept": 8,
+"rejected": 0
+},
+"#beginnerworkout": {
+"kept": 10,
+"rejected": 3
+},
+"#biceps": {
+"kept": 15,
+"rejected": 11
+},
+"#bodybuilding": {
+"kept": 3,
+"rejected": 2
+},
+"#bodyrecomposition": {
+"kept": 1,
+"rejected": 0
+},
+"#bodytransformation": {
+"kept": 5,
+"rejected": 1
+},
+"#calisthenics": {
+"kept": 1,
+"rejected": 1
+},
+"#calisthenicscoach": {
+"kept": 2,
+"rejected": 1
+},
+"#caloriedeficithack": {
+"kept": 6,
+"rejected": 1
+},
+"#certifiedpersonaltrainer": {
+"kept": 2,
+"rejected": 1
+},
+"#cottagecheese": {
+"kept": 10,
+"rejected": 34
+},
+"#cottagecheeserecipes": {
+"kept": 33,
+"rejected": 46
+},
+"#creatorsearchinsights": {
+"kept": 0,
+"rejected": 3
+},
+"#crossfit": {
+"kept": 8,
+"rejected": 5
+},
+"#crossfitcoach": {
+"kept": 2,
+"rejected": 0
+},
+"#dietitian": {
+"kept": 2,
+"rejected": 7
+},
+"#dietitiantok": {
+"kept": 1,
+"rejected": 0
+},
+"#fatloss": {
+"kept": 3,
+"rejected": 1
+},
+"#fatlosstips": {
+"kept": 1,
+"rejected": 0
+},
+"#fibermaxxing": {
+"kept": 13,
+"rejected": 9
+},
+"#fit": {
+"kept": 0,
+"rejected": 11
+},
+"#fitness": {
+"kept": 1,
+"rejected": 4
+},
+"#fitnessadvice": {
+"kept": 5,
+"rejected": 1
+},
+"#fitnesscoach": {
+"kept": 8,
+"rejected": 0
+},
+"#fitnesscreator": {
+"kept": 5,
+"rejected": 0
+},
+"#fitnessinfluencer": {
+"kept": 14,
+"rejected": 12
+},
+"#fitnessjourney": {
+"kept": 3,
+"rejected": 1
+},
+"#fitnessmotivation": {
+"kept": 6,
+"rejected": 1
+},
+"#fitnesstips": {
+"kept": 2,
+"rejected": 0
+},
+"#fitnesstok": {
+"kept": 11,
+"rejected": 0
+},
+"#fittok": {
+"kept": 1,
+"rejected": 0
+},
+"#food": {
+"kept": 0,
+"rejected": 13
+},
+"#functionaltraining": {
+"kept": 7,
+"rejected": 0
+},
+"#girlswholift": {
+"kept": 6,
+"rejected": 0
+},
+"#glowup": {
+"kept": 0,
+"rejected": 13
+},
+"#glutegrowth": {
+"kept": 7,
+"rejected": 2
+},
+"#glutes": {
+"kept": 1,
+"rejected": 1
+},
+"#glutesworkout": {
+"kept": 1,
+"rejected": 0
+},
+"#gluteworkout": {
+"kept": 39,
+"rejected": 1
+},
+"#guthealth": {
+"kept": 16,
+"rejected": 28
+},
+"#guttok": {
+"kept": 2,
+"rejected": 8
+},
+"#gym": {
+"kept": 9,
+"rejected": 2
+},
+"#gymbeginner": {
+"kept": 5,
+"rejected": 1
+},
+"#gymcoach": {
+"kept": 3,
+"rejected": 1
+},
+"#gymgirl": {
+"kept": 6,
+"rejected": 5
+},
+"#gymgirls": {
+"kept": 2,
+"rejected": 0
+},
+"#gymhumor": {
+"kept": 2,
+"rejected": 0
+},
+"#gymmotivation": {
+"kept": 6,
+"rejected": 4
+},
+"#gymrat": {
+"kept": 1,
+"rejected": 0
+},
+"#gymtips": {
+"kept": 3,
+"rejected": 0
+},
+"#gymtok": {
+"kept": 10,
+"rejected": 1
+},
+"#gymtransformation": {
+"kept": 3,
+"rejected": 1
+},
+"#health": {
+"kept": 1,
+"rejected": 3
+},
+"#healthy": {
+"kept": 4,
+"rejected": 22
+},
+"#healthyfood": {
+"kept": 0,
+"rejected": 1
+},
+"#healthylifestyle": {
+"kept": 4,
+"rejected": 6
+},
+"#healthyrecipes": {
+"kept": 0,
+"rejected": 6
+},
+"#hiddenmacros": {
+"kept": 0,
+"rejected": 7
+},
+"#highprotein": {
+"kept": 7,
+"rejected": 20
+},
+"#hiitcoach": {
+"kept": 1,
+"rejected": 0
+},
+"#homeworkout": {
+"kept": 10,
+"rejected": 2
+},
+"#hybridathlete": {
+"kept": 4,
+"rejected": 2
+},
+"#hypertrophy": {
+"kept": 4,
+"rejected": 9
+},
+"#hyrox": {
+"kept": 14,
+"rejected": 20
+},
+"#lazyfitness": {
+"kept": 4,
+"rejected": 3
+},
+"#legday": {
+"kept": 17,
+"rejected": 1
+},
+"#legworkout": {
+"kept": 5,
+"rejected": 3
+},
+"#macrofriendly": {
+"kept": 17,
+"rejected": 8
+},
+"#macrofriendlyswaps": {
+"kept": 3,
+"rejected": 1
+},
+"#macroscoach": {
+"kept": 3,
+"rejected": 1
+},
+"#makeup": {
+"kept": 3,
+"rejected": 55
+},
+"#marathontraining": {
+"kept": 23,
+"rejected": 18
+},
+"#mealprep": {
+"kept": 10,
+"rejected": 6
+},
+"#mobility": {
+"kept": 5,
+"rejected": 3
+},
+"#mobilitycoach": {
+"kept": 1,
+"rejected": 1
+},
+"#motivation": {
+"kept": 0,
+"rejected": 4
+},
+"#musclebuilding": {
+"kept": 6,
+"rejected": 0
+},
+"#nutritioncoach": {
+"kept": 3,
+"rejected": 0
+},
+"#nutritiontips": {
+"kept": 6,
+"rejected": 0
+},
+"#onlinefitnesscoach": {
+"kept": 1,
+"rejected": 0
+},
+"#outfitinspo": {
+"kept": 0,
+"rejected": 19
+},
+"#personaltrainer": {
+"kept": 4,
+"rejected": 2
+},
+"#pilates": {
+"kept": 35,
+"rejected": 10
+},
+"#pilatesinstructor": {
+"kept": 6,
+"rejected": 1
+},
+"#powerlifting": {
+"kept": 2,
+"rejected": 1
+},
+"#powerliftingcoach": {
+"kept": 3,
+"rejected": 0
+},
+"#proffee": {
+"kept": 11,
+"rejected": 9
+},
+"#progressiveoverload": {
+"kept": 7,
+"rejected": 6
+},
+"#protein": {
+"kept": 0,
+"rejected": 3
+},
+"#proteincoffee": {
+"kept": 10,
+"rejected": 29
+},
+"#proteinintake": {
+"kept": 11,
+"rejected": 15
+},
+"#proteinmaxxing": {
+"kept": 7,
+"rejected": 7
+},
+"#runningcoach": {
+"kept": 4,
+"rejected": 0
+},
+"#skincare": {
+"kept": 0,
+"rejected": 1
+},
+"#sportsnutritionist": {
+"kept": 3,
+"rejected": 0
+},
+"#strengthandconditioning": {
+"kept": 4,
+"rejected": 1
+},
+"#strengthcoach": {
+"kept": 4,
+"rejected": 0
+},
+"#strengthtraining": {
+"kept": 4,
+"rejected": 1
+},
+"#tinnedfish": {
+"kept": 11,
+"rejected": 63
+},
+"#trainersoftiktok": {
+"kept": 7,
+"rejected": 0
+},
+"#training": {
+"kept": 0,
+"rejected": 1
+},
+"#transformation": {
+"kept": 0,
+"rejected": 19
+},
+"#travel": {
+"kept": 0,
+"rejected": 8
+},
+"#upperbody": {
+"kept": 17,
+"rejected": 1
+},
+"#volumeeating": {
+"kept": 12,
+"rejected": 6
+},
+"#weightlifting": {
+"kept": 6,
+"rejected": 3
+},
+"#weightliftingcoach": {
+"kept": 1,
+"rejected": 0
+},
+"#weightloss": {
+"kept": 2,
+"rejected": 0
+},
+"#weightlosscoach": {
+"kept": 0,
+"rejected": 1
+},
+"#wellness": {
+"kept": 1,
+"rejected": 1
+},
+"#whatieatinaday": {
+"kept": 3,
+"rejected": 12
+},
+"#womensfitness": {
+"kept": 6,
+"rejected": 0
+},
+"#womenwholift": {
+"kept": 4,
+"rejected": 1
+},
+"#workout": {
+"kept": 1,
+"rejected": 1
+},
+"#workoutmotivation": {
+"kept": 1,
+"rejected": 3
+},
+"#workoutroutine": {
+"kept": 9,
+"rejected": 2
+},
+"#yogainstructor": {
+"kept": 6,
+"rejected": 0
+},
+"extension": {
+"kept": 118,
+"rejected": 0
+},
+"handle": {
+"kept": 1,
+"rejected": 2
+},
+"handles:calai-outreach": {
+"kept": 0,
+"rejected": 46
+},
+"handles:ig-emails-1": {
+"kept": 177,
+"rejected": 290
+},
+"handles:sheet-7": {
+"kept": 4,
+"rejected": 1
+},
+"search:2027 wellness trend predictions": {
+"kept": 0,
+"rejected": 1
+},
+"search:cottage cheese": {
+"kept": 4,
+"rejected": 2
+},
+"search:fibermaxxing": {
+"kept": 0,
+"rejected": 1
+},
+"search:garmin": {
+"kept": 0,
+"rejected": 1
+},
+"search:garmin ambassador": {
+"kept": 0,
+"rejected": 4
+},
+"search:gut health": {
+"kept": 1,
+"rejected": 2
+},
+"search:gut tok": {
+"kept": 0,
+"rejected": 2
+},
+"search:hatch": {
+"kept": 0,
+"rejected": 2
+},
+"search:hevy": {
+"kept": 1,
+"rejected": 1
+},
+"search:hidden macros": {
+"kept": 0,
+"rejected": 1
+},
+"search:high protein": {
+"kept": 2,
+"rejected": 1
+},
+"search:holistic healing": {
+"kept": 1,
+"rejected": 0
+},
+"search:holistic wellness": {
+"kept": 0,
+"rejected": 1
+},
+"search:luteal phase eats": {
+"kept": 0,
+"rejected": 1
+},
+"search:macro friendly swaps": {
+"kept": 1,
+"rejected": 1
+},
+"search:natural cycles": {
+"kept": 0,
+"rejected": 2
+},
+"search:proffee": {
+"kept": 0,
+"rejected": 1
+},
+"search:protein coffee": {
+"kept": 0,
+"rejected": 2
+},
+"search:renpho": {
+"kept": 0,
+"rejected": 2
+},
+"search:renpho partnership": {
+"kept": 0,
+"rejected": 7
+},
+"search:run club": {
+"kept": 0,
+"rejected": 3
+},
+"search:runna partner": {
+"kept": 3,
+"rejected": 3
+},
+"search:strava": {
+"kept": 0,
+"rejected": 1
+},
+"search:strava partner": {
+"kept": 0,
+"rejected": 1
+},
+"search:tinned fish": {
+"kept": 0,
+"rejected": 1
+},
+"search:volume eating": {
+"kept": 3,
+"rejected": 3
+},
+"search:whoop": {
+"kept": 0,
+"rejected": 1
+}
+}

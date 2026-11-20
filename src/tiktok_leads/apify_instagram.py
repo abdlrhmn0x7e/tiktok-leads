@@ -14,11 +14,14 @@ Leads go to SQLite and Convex with platform=instagram.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import logging
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from tiktok_leads.apify_client import run_actor
@@ -36,20 +39,39 @@ SEARCH_ACTOR = "apify~instagram-hashtag-scraper"
 PROFILE_ACTOR = "apify~instagram-profile-scraper"
 REEL_ACTOR = "apify~instagram-reel-scraper"
 SOURCE_LABEL = "apify"
-# shortcut: the search actor's free-plan price per result; paid tiers are cheaper, so this overestimates there.
+# shortcut: the free-plan price every actor here charges per result; paid tiers are cheaper, so this overestimates there.
 SEARCH_RESULT_USD = 0.0026
+HANDLE_BATCH = 50
 
 
 @dataclass(frozen=True)
 class ReelHit:
     handle: str
     niche: str
-    term: str
+    found_via: str
     views: int
+    # An email from a handle list: the creator becomes a lead whatever their numbers.
+    email: str | None = None
 
 
 def search_input(terms: list[str], *, results_per_term: int) -> dict:
     return {"hashtags": terms, "keywordSearch": True, "resultsType": "reels", "resultsLimit": results_per_term}
+
+
+def clean_handle(token: str) -> str | None:
+    """A handle pasted from anywhere: strips @, stray punctuation around it and +N
+    suffixes. None when what's left still isn't a valid TikTok/Instagram username."""
+    raw = token.strip().lower().lstrip("@,:; ").split("+")[0].replace(",", ".")
+    match = re.match(r"[a-z0-9._]+", raw)
+    if not match or any(ch.isalnum() for ch in raw[match.end() :]):
+        return None
+    handle = match.group().strip(".")
+    return handle if 0 < len(handle) <= 30 else None
+
+
+def read_handles(path: Path) -> list[str]:
+    handles = (clean_handle(token) for token in path.read_text().split())
+    return list(dict.fromkeys(handle for handle in handles if handle))
 
 
 def search_cursor(term: str) -> str:
@@ -87,7 +109,7 @@ def pick_reel_hits(
             continue
         if handle not in best or views > best[handle].views:
             term = term_of(item)
-            best[handle] = ReelHit(handle, term_niches.get(term, default_niche), term, views)
+            best[handle] = ReelHit(handle, term_niches.get(term, default_niche), f"search:{term}", views)
     return sorted(best.values(), key=lambda hit: -hit.views)
 
 
@@ -137,6 +159,8 @@ def run_instagram(settings: Settings, args: argparse.Namespace, term_niches: dic
     repository = LeadRepository(settings.database_path)
     repository.initialize()
     try:
+        if args.handles_file:
+            return run_handles(settings, repository, budget, args)
         if args.items_file and not args.dry_run:
             items = json.loads(args.items_file.read_text())
         else:
@@ -185,6 +209,35 @@ def run_instagram(settings: Settings, args: argparse.Namespace, term_niches: dic
     return 0
 
 
+def run_handles(settings: Settings, repository: LeadRepository, budget: Budget, args: argparse.Namespace) -> int:
+    skip = repository.seen_instagram_handles()
+    hits = []
+    for path in args.handles_file:
+        if path.suffix == ".csv":
+            with path.open(newline="") as file:
+                listed = [
+                    ReelHit(row["instagram"], args.niche, f"handles:{row['source']}", 0, row["email"] or None)
+                    for row in csv.DictReader(file)
+                ]
+        else:
+            listed = [ReelHit(handle, args.niche, f"handles:{path.stem}", 0) for handle in read_handles(path)]
+        for hit in listed:
+            if hit.handle not in skip:
+                skip.add(hit.handle)
+                hits.append(hit)
+    print(f"{len(hits)} handles not checked yet; up to ${len(hits) * SEARCH_RESULT_USD:.2f} for all their profiles")
+    if args.dry_run or not hits:
+        return 0
+    inserted = 0
+    for start in range(0, len(hits), HANDLE_BATCH):
+        if budget.remaining <= 0.01:
+            print(f"Budget spent after {start} handles; run the same command again to continue")
+            break
+        inserted += verify_instagram(settings, repository, budget, hits[start : start + HANDLE_BATCH], args)
+    print(f"Inserted {inserted} new Instagram lead(s).")
+    return 0
+
+
 def verify_instagram(
     settings: Settings,
     repository: LeadRepository,
@@ -194,7 +247,7 @@ def verify_instagram(
 ) -> int:
     def record(hit: ReelHit, skip: str | None) -> None:
         repository.record_instagram_profile(
-            handle=hit.handle, niche=hit.niche, skip_reason=skip, found_via=f"search:{hit.term}"
+            handle=hit.handle, niche=hit.niche, skip_reason=skip, found_via=hit.found_via
         )
 
     profiles = budget.run(PROFILE_ACTOR, {"usernames": [hit.handle for hit in hits]}, max_items=len(hits))
@@ -205,14 +258,17 @@ def verify_instagram(
         profile = by_handle.get(hit.handle)
         if profile is None:
             continue  # not recorded: a later run retries it
+        if profile.get("error"):  # e.g. not_found: deleted or renamed, so never pay for it again
+            record(hit, str(profile["error"]))
+            continue
         followers = int(profile.get("followersCount") or 0)
         if profile.get("private"):
             record(hit, "private")
             continue
-        if not args.min_followers <= followers <= args.max_followers:
+        if not hit.email and not args.min_followers <= followers <= args.max_followers:
             record(hit, "low_followers" if followers < args.min_followers else "high_followers")
             continue
-        emails = profile_emails(profile, resolve_links=settings.resolve_bio_link_emails)
+        emails = [hit.email] if hit.email else profile_emails(profile, resolve_links=settings.resolve_bio_link_emails)
         if not emails:
             record(hit, "no_email")
             continue
@@ -223,6 +279,8 @@ def verify_instagram(
     print(f"{len(emailed)} creators in the follower band with a new email")
     if not emailed:
         return 0
+    if budget.remaining <= 0.01:
+        return 0  # left unrecorded, so a later run checks them again
 
     reels = budget.run(
         REEL_ACTOR,
@@ -234,12 +292,15 @@ def verify_instagram(
         max_items=len(emailed) * args.reels_per_creator,
     )
     views = reel_views(reels)
+    capped = budget.remaining <= 0.01
 
     notifier = build_notifier(settings)
     inserted = 0
     for hit, profile, email in emailed:
+        if capped and hit.handle not in views:
+            continue  # the budget cut the reel run off before this creator; retried next run
         average = robust_average_view_count(views.get(hit.handle, []))
-        if average is None or average < settings.min_average_views:
+        if not hit.email and (average is None or average < settings.min_average_views):
             record(hit, "low_views")
             continue
         record(hit, None)
@@ -249,9 +310,9 @@ def verify_instagram(
             niche=hit.niche,
             email=email,
             followers_count=int(profile.get("followersCount") or 0),
-            average_views=floor_view_count(average),
+            average_views=floor_view_count(average) if average else 0,
             source=SOURCE_LABEL,
-            found_via=f"search:{hit.term}",
+            found_via=hit.found_via,
             platform="instagram",
         )
         if not repository.insert_lead(lead):

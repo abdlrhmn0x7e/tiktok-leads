@@ -122,11 +122,19 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
 
     if settings.discovery_following_enabled:
         daemon_niches = {niche.lower(): niche for niche in niches}
-        repository.add_following_seeds(
-            (handle, daemon_niches[niche])
-            for handle, niche in fetch_following_seeds(settings)
-            if niche in daemon_niches
-        )
+        # A sweep can be one item long and repeat every few seconds, and a full seed read
+        # costs Convex ~4 MB: ask at most every 10 min, and only for leads changed since.
+        fetched_at = float(repository.get_meta(SEEDS_FETCHED_AT) or 0)
+        now = time.time()
+        if now - fetched_at >= SEEDS_FETCH_INTERVAL_SECONDS:
+            seeds = fetch_following_seeds(
+                settings, since_ms=int((fetched_at - SEEDS_FETCH_INTERVAL_SECONDS) * 1000)
+            )
+            if seeds is not None:
+                repository.add_following_seeds(
+                    (handle, daemon_niches[niche]) for handle, niche in seeds if niche in daemon_niches
+                )
+                repository.set_meta(SEEDS_FETCHED_AT, str(now))
         for niche in niches:
             for handle in repository.due_following_seeds(
                 niche, limit=settings.discovery_following_seeds_per_sweep
@@ -185,14 +193,20 @@ def fetch_search_terms(settings: Settings) -> list[tuple[str, str]]:
         return []
 
 
-def fetch_following_seeds(settings: Settings) -> list[tuple[str, str]]:
-    """(handle, niche) pairs: creators the outreach team submitted or emailed
-    in leads-hub. Same failure behavior as fetch_search_terms."""
+SEEDS_FETCHED_AT = "following_seeds_fetched_at"
+SEEDS_FETCH_INTERVAL_SECONDS = 600
+
+
+def fetch_following_seeds(settings: Settings, *, since_ms: int = 0) -> list[tuple[str, str]] | None:
+    """(handle, niche) pairs: creators leads-hub gained or contacted since
+    `since_ms` (it caps the window at 30 days). None when the fetch failed, so
+    the caller asks for the same window again."""
     if not settings.convex_site_url or not settings.convex_ingest_api_key:
-        return []
+        return None
     try:
         response = requests.get(
             f"{settings.convex_site_url.rstrip('/')}/scraper/following-seeds",
+            params={"since": max(0, since_ms)},
             headers={"Authorization": f"Bearer {settings.convex_ingest_api_key}"},
             timeout=20,
         )
@@ -204,7 +218,7 @@ def fetch_following_seeds(settings: Settings) -> list[tuple[str, str]]:
         return [(handle, niche) for handle, niche in seeds if handle]
     except Exception:
         logger.exception("daemon: failed to fetch following seeds from Convex; skipping them this sweep")
-        return []
+        return None
 
 
 def _trending_slots(trending: list[WorkItem], *, general_count: int, share: float) -> list[WorkItem]:

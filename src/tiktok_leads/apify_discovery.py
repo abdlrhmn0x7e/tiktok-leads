@@ -180,6 +180,14 @@ def parse_args(settings: Settings) -> argparse.Namespace:
     )
     add_filter_args(parser, settings)
     parser.add_argument("--items-file", type=Path, help="Verify saved Apify results instead of running Apify")
+    parser.add_argument(
+        "--handles-file",
+        type=Path,
+        action="append",
+        default=[],
+        help="Instagram only: check these handles (one per line, @ optional) instead of searching. Repeatable; "
+        "handles already checked are skipped, so re-run the same command to continue",
+    )
     parser.add_argument("--discover-only", action="store_true", help="Run Apify and save results, skip verification")
     parser.add_argument("--dry-run", action="store_true", help="Print the Apify input and exit without spending")
     parser.add_argument("--log-level", default="INFO", help="Logging level: DEBUG, INFO, WARNING, ERROR")
@@ -215,7 +223,7 @@ def main() -> int:
         logging.getLogger("TikTokApi.tiktok").setLevel(logging.CRITICAL)
 
     term_niches = {term: args.niche for term in args.term} or dict(fetch_search_terms(settings))
-    if not term_niches and not args.items_file:
+    if not term_niches and not args.items_file and not args.handles_file:
         print("No search terms: pass --term or set CONVEX_SITE_URL and CONVEX_INGEST_API_KEY.")
         return 1
     if args.platform == "instagram":

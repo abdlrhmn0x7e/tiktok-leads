@@ -483,6 +483,14 @@ HARVEST_STEMS: dict[str, tuple[str, ...]] = {
         "trainer", "muscle", "glute", "legday", "bicep", "pilates", "calisthenic", "bodybuild",
         "powerlift", "strength", "cardio", "hiit",
         "weightloss", "fatloss", "macro", "calorie", "nutrition",
+        # 2026-11-20: lift and split names. 1,589 harvested tags with these words had never
+        # been crawled for lack of a stem, though qualifying creators use them hundreds of
+        # times (#squat 409, #benchpress 355, #chestday 320, #physique 496, #strongwomen 558).
+        "squat", "benchpress", "chestday", "armday", "shoulderday", "backday", "pushday",
+        "pullday", "pushpull", "physique", "bulking", "leanbulk", "kettlebell", "dumbbell",
+        "barbell", "tricep", "hamstring", "smithmachine", "cablemachine", "strongwom",
+        "stronggirl", "strongnotskinny", "gains", "wholift", "weightedvest", "onlinecoach",
+        "personaltrain",
     ),
 }
 
@@ -495,6 +503,7 @@ HARVEST_EXCLUDED: dict[str, re.Pattern[str]] = {
         r"recipe|meal|food|cook|bake|snack|breakfast|dinner|lunch|vegan|keto|whatieat|protein"
         r"|running|runner|marathon|hyrox|crossfit|boxing|football|soccer|triathl"
         r"|mom(?!ent)|(?<!maxi)mum|baby|pregnan|postpartum"
+        r"|bargain|drsquatch"
     ),
 }
 
