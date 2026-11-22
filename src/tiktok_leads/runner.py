@@ -29,7 +29,9 @@ async def scrape_handles(
     min_followers: int,
     min_average_views: int,
     max_followers: int | None = None,
-    found_via: str = "handle",
+    found_via: str | None = "handle",
+    found_via_by_handle: Mapping[str, str | None] | None = None,
+    mark_bio_link_enriched: bool = False,
     source_label: str | None = None,
     known_emails: Mapping[str, str] | None = None,
     exclude_handles: set[str] | None = None,
@@ -56,6 +58,8 @@ async def scrape_handles(
         min_average_views=min_average_views,
         max_followers=max_followers,
         found_via=found_via,
+        found_via_by_handle=found_via_by_handle,
+        mark_bio_link_enriched=mark_bio_link_enriched,
         exclude_handles=exclude_handles,
     )
 
@@ -244,6 +248,8 @@ async def _process_candidates(
     min_average_views: int,
     max_followers: int | None = None,
     found_via: str | None = None,
+    found_via_by_handle: Mapping[str, str | None] | None = None,
+    mark_bio_link_enriched: bool = False,
     exclude_handles: set[str] | None = None,
 ) -> int:
     inserted = 0
@@ -272,16 +278,23 @@ async def _process_candidates(
                 evaluation.lead is not None and repository.exists_by_email(evaluation.lead.email)
             )
             skip_code = "duplicate_email" if duplicate_email else evaluation.skip_code
+            norm_handle = candidate.handle.removeprefix("@").lower() if candidate.handle else ""
+            candidate_found_via = (
+                found_via_by_handle.get(norm_handle, found_via)
+                if found_via_by_handle is not None
+                else found_via
+            )
             repository.record_scraped_profile(
                 handle=candidate.handle,
                 niche=candidate.niche,
                 source=candidate.source,
                 skip_reason=skip_code,
-                found_via=found_via,
+                found_via=candidate_found_via,
+                bio_link_enriched=mark_bio_link_enriched,
                 commit=False,
             )
             if exclude_handles is not None and candidate.handle:
-                exclude_handles.add(candidate.handle.removeprefix("@").lower())
+                exclude_handles.add(norm_handle)
             # Only harvest hashtags from on-niche creators at or above the
             # follower bar so off-niche / rejected-group accounts never pollute
             # the discovery flywheel.
@@ -306,7 +319,7 @@ async def _process_candidates(
                 logger.info("skipped @%s: %s", candidate.handle or "unknown", evaluation.skip_reason)
                 continue
 
-            lead = replace(evaluation.lead, found_via=found_via)
+            lead = replace(evaluation.lead, found_via=candidate_found_via)
             if duplicate_email:
                 repository.commit()
                 pending_writes = False

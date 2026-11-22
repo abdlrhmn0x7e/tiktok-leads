@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS scraped_profiles (
     source TEXT NOT NULL,
     skip_reason TEXT,
     found_via TEXT,
+    bio_link_enriched_at TEXT,
     last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -139,6 +140,7 @@ class LeadRepository:
         self._migrate_scraped_profiles_handle_unique()
         self._migrate_add_scraped_profiles_skip_reason()
         self._migrate_add_scraped_profiles_found_via()
+        self._migrate_add_scraped_profiles_bio_link_enriched_at()
         self._migrate_add_following_seeds_level()
         self._backfill_scraped_profiles_from_influencers()
         self._backfill_lead_sources()
@@ -199,6 +201,21 @@ class LeadRepository:
         if "found_via" not in columns:
             self.connection.execute("ALTER TABLE scraped_profiles ADD COLUMN found_via TEXT")
 
+    def _migrate_add_scraped_profiles_bio_link_enriched_at(self) -> None:
+        columns = {
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(scraped_profiles)").fetchall()
+        }
+        if "bio_link_enriched_at" not in columns:
+            self.connection.execute("ALTER TABLE scraped_profiles ADD COLUMN bio_link_enriched_at TEXT")
+            self.connection.execute(
+                """
+                UPDATE scraped_profiles
+                SET bio_link_enriched_at = last_seen_at
+                WHERE found_via = 'enrich:bio_link' AND bio_link_enriched_at IS NULL
+                """
+            )
+
     def _migrate_add_scraped_profiles_skip_reason(self) -> None:
         columns = {
             row["name"]
@@ -234,21 +251,28 @@ class LeadRepository:
         source: str,
         skip_reason: str | None = None,
         found_via: str | None = None,
+        bio_link_enriched: bool = False,
         commit: bool = True,
     ) -> None:
         normalized_handle = handle.removeprefix("@").lower()
         self.connection.execute(
             """
-            INSERT INTO scraped_profiles (handle, niche, source, skip_reason, found_via, last_seen_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO scraped_profiles (
+                handle, niche, source, skip_reason, found_via, bio_link_enriched_at, last_seen_at
+            )
+            VALUES (?, ?, ?, ?, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END, CURRENT_TIMESTAMP)
             ON CONFLICT(handle) DO UPDATE SET
                 source = excluded.source,
                 niche = excluded.niche,
                 skip_reason = excluded.skip_reason,
-                found_via = excluded.found_via,
+                found_via = coalesce(excluded.found_via, scraped_profiles.found_via),
+                bio_link_enriched_at = CASE
+                    WHEN excluded.bio_link_enriched_at IS NOT NULL THEN excluded.bio_link_enriched_at
+                    ELSE scraped_profiles.bio_link_enriched_at
+                END,
                 last_seen_at = CURRENT_TIMESTAMP
             """,
-            (normalized_handle, niche, source, skip_reason, found_via),
+            (normalized_handle, niche, source, skip_reason, found_via, 1 if bio_link_enriched else 0),
         )
         if commit:
             self.connection.commit()
@@ -321,13 +345,13 @@ class LeadRepository:
         ).fetchall()
         return [(str(row["handle"]), str(row["niche"])) for row in rows]
 
-    def no_email_seed_handles(self, niche: str, *, limit: int = 5000) -> list[str]:
+    def no_email_seed_handles(self, niche: str, *, limit: int = 5000) -> list[tuple[str, str | None]]:
         """Pre-vetted on-niche >=10k creators (level-2 following seeds) that were
         skipped as no_email and haven't been through bio-link enrichment yet.
-        Ordered oldest first so clean level-1-discovered seeds run first."""
+        Returns (handle, original_found_via) ordered oldest first."""
         rows = self.connection.execute(
             """
-            SELECT fs.handle
+            SELECT fs.handle, sp.found_via
             FROM following_seeds fs
             JOIN scraped_profiles sp ON sp.handle = fs.handle
             LEFT JOIN influencers i
@@ -335,6 +359,7 @@ class LeadRepository:
             WHERE fs.niche = ?
               AND fs.level = 2
               AND sp.skip_reason = 'no_email'
+              AND sp.bio_link_enriched_at IS NULL
               AND coalesce(sp.found_via, '') != 'enrich:bio_link'
               AND i.handle IS NULL
             ORDER BY fs.added_at ASC
@@ -342,7 +367,13 @@ class LeadRepository:
             """,
             (niche, limit),
         ).fetchall()
-        return [str(row["handle"]) for row in rows]
+        results: list[tuple[str, str | None]] = []
+        for row in rows:
+            fv = str(row["found_via"]) if row["found_via"] else None
+            if fv in ("recheck", "enrich:bio_link"):
+                fv = None
+            results.append((str(row["handle"]), fv))
+        return results
 
     def mark_rechecked(self, handle: str) -> None:
         """A renamed creator is recorded under the new handle, so the old one

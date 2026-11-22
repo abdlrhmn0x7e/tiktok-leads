@@ -512,7 +512,9 @@ _NON_GYM = (
     r"|songs? ?promo|dm for (?:songs? )?promo|spotify|telegram|kik|promotions"
     r"|relationship coach\w*|dating coach\w*|avoidant|psycholog(?:y|ist)|therapist"
     r"|biohacking|longevity|reiki"
+    r"|troll ?face\w*|coldest moments|best moments|viral clips|daily clips|clip(?:s)? page|meme(?:s)? page"
 )
+_CLIP_FARM_TAGS = re.compile(r"(?i)#(?:trollface\w*|unfreez\w*|memepage)\b")
 REJECTED_GROUPS: dict[str, dict[str, re.Pattern[str]]] = {
     "fitness": {
         "sport": re.compile(rf"(?i)(?<![a-z])(?:{_SPORT})(?![a-z])"),
@@ -628,6 +630,8 @@ def rejected_group(niche: str, bio: str, captions: Sequence[str], email: str) ->
         return None
     if email and _COUNTRY_EMAIL.search(email.strip()):
         return "email on a country domain"
+    if sum(bool(_CLIP_FARM_TAGS.search(caption)) for caption in captions) >= 2:
+        return "clip or meme repost page"
     texts = [re.sub(r"#\S+", "", caption) for caption in captions]
     for name, terms in groups.items():
         in_captions = name != "family or lifestyle" and sum(bool(terms.search(text)) for text in texts) >= 2

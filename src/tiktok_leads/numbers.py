@@ -10,7 +10,10 @@ def robust_average_view_count(values: list[int]) -> int | None:
     if count < 5:
         return median(sorted_values)
 
-    trim_count = max(1, round(count * 0.15))
+    # TikTok allows up to 3 pinned videos; once we have enough samples, trim at
+    # least 3 from each tail so 3 pinned viral outliers can't inflate a low-view
+    # account above the threshold.
+    trim_count = max(3, round(count * 0.2)) if count >= 9 else max(1, round(count * 0.15))
     trimmed = sorted_values[trim_count:-trim_count]
     if not trimmed:
         trimmed = sorted_values

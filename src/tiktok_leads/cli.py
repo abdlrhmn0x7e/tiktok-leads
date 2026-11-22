@@ -132,7 +132,9 @@ async def async_main() -> None:
         return
 
     if args.enrich_no_email:
-        handles = repository.no_email_seed_handles(args.niche, limit=args.limit)
+        seed_pairs = repository.no_email_seed_handles(args.niche, limit=args.limit)
+        handles = [handle for handle, _ in seed_pairs]
+        found_via_by_handle = {handle: fv for handle, fv in seed_pairs}
         logging.info(
             "enriching %s pre-vetted no_email handle(s) for niche=%s",
             len(handles),
@@ -155,7 +157,9 @@ async def async_main() -> None:
                     min_followers=settings.min_followers,
                     min_average_views=settings.min_average_views,
                     max_followers=settings.max_followers,
-                    found_via="enrich:bio_link",
+                    found_via=None,
+                    found_via_by_handle=found_via_by_handle,
+                    mark_bio_link_enriched=True,
                 )
         except TikTokBlockedError as error:
             logging.warning("stopped early because TikTok is blocking requests: %s", error)

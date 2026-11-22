@@ -312,3 +312,115 @@ def test_hashtag_prefilter_skips_embed_for_rejected_group_and_updates_exclude_ha
     # Off-niche marathon.dan's hashtag was NOT harvested; gym.sarah's #deadlift WAS harvested
     tags = {row["hashtag"] for row in repo.connection.execute("SELECT hashtag FROM discovered_hashtags")}
     assert tags == {"deadlift"}
+
+
+def test_pinned_viral_outliers_do_not_inflate_average_views_and_troll_pages_rejected():
+    from tiktok_leads.numbers import robust_average_view_count
+
+    # 3 pinned viral videos + 10 low-view videos (exact @skulltok1 distribution)
+    views = [4_400_000, 7_200_000, 8_000_000, 19_100, 4_231, 3_224, 4_072, 435, 1_482, 1_052, 879, 10_300, 1_447]
+    avg = robust_average_view_count(views)
+    assert avg is not None and avg < 10_000
+
+    # Normal consistent creator with 3 viral pins still passes cleanly
+    consistent = [1_500_000, 900_000, 800_000, 25_000, 22_000, 18_000, 15_000, 14_000, 12_000, 11_000, 9_500, 8_000]
+    assert robust_average_view_count(consistent) >= 14_000
+
+    # Troll / clip-repost signals rejected even if captions spam #calisthenics / #gymer
+    assert rejected_group(
+        "fitness",
+        "only Coldest Moments 🔥\ncontact For . skulltok1@gmail.com",
+        ["#MoneySavingTips #gymer #unfreez", "Hulk version #trollface #gymer #unfreez"],
+        "skulltok1@gmail.com",
+    ) is not None
+
+
+def test_enrich_preserves_original_found_via_and_tracks_enrichment(tmp_path):
+    from tiktok_leads.models import CandidateProfile
+    from tiktok_leads.runner import scrape_handles
+
+    repo = LeadRepository(tmp_path / "leads.sqlite")
+    repo.initialize()
+    repo.add_found_seed("gymcoach.alex", "fitness", "sec_1")
+    repo.record_scraped_profile(
+        handle="gymcoach.alex",
+        niche="fitness",
+        source="tiktokapi",
+        skip_reason="no_email",
+        found_via="following:@level1seed",
+    )
+    repo.add_found_seed("gymcoach.sam", "fitness", "sec_2")
+    repo.record_scraped_profile(
+        handle="gymcoach.sam",
+        niche="fitness",
+        source="tiktokapi",
+        skip_reason="no_email",
+        found_via="#bodyrecomposition",
+    )
+
+    pairs = repo.no_email_seed_handles("fitness", limit=10)
+    assert pairs == [("gymcoach.alex", "following:@level1seed"), ("gymcoach.sam", "#bodyrecomposition")]
+
+    class FakeSource:
+        async def profiles_from_handles(self, handles, *, niche):
+            yield CandidateProfile(
+                handle="gymcoach.alex",
+                profile_url="https://www.tiktok.com/@gymcoach.alex",
+                niche=niche,
+                followers_count=50_000,
+                bio="Online gym coach alex@gymcoach.com",
+                recent_video_views=[20_000, 22_000, 25_000],
+                recent_video_captions=["push day bench press", "leg day squat", "hypertrophy training"],
+                source="tiktokapi",
+            )
+            yield CandidateProfile(
+                handle="gymcoach.sam",
+                profile_url="https://www.tiktok.com/@gymcoach.sam",
+                niche=niche,
+                followers_count=40_000,
+                bio="Online gym coach no email yet",
+                recent_video_views=[20_000, 22_000, 25_000],
+                recent_video_captions=["push day bench press", "leg day squat", "hypertrophy training"],
+                source="tiktokapi",
+            )
+
+    class CaptureNotifier:
+        def __init__(self):
+            self.leads = []
+
+        def send(self, lead):
+            self.leads.append(lead)
+
+        def send_found_via(self, lead):
+            pass
+
+    notifier = CaptureNotifier()
+    inserted = asyncio.run(
+        scrape_handles(
+            FakeSource(),
+            repo,
+            notifier,
+            handles=[h for h, _ in pairs],
+            niche="fitness",
+            min_followers=10_000,
+            min_average_views=10_000,
+            found_via=None,
+            found_via_by_handle=dict(pairs),
+            mark_bio_link_enriched=True,
+        )
+    )
+    assert inserted == 1
+    assert len(notifier.leads) == 1
+    assert notifier.leads[0].found_via == "following:@level1seed"
+
+    # Both handles are now marked enriched and keep their original found_via tags
+    rows = {
+        r["handle"]: (r["found_via"], r["bio_link_enriched_at"])
+        for r in repo.connection.execute("SELECT handle, found_via, bio_link_enriched_at FROM scraped_profiles")
+    }
+    assert rows["gymcoach.alex"][0] == "following:@level1seed"
+    assert rows["gymcoach.alex"][1] is not None
+    assert rows["gymcoach.sam"][0] == "#bodyrecomposition"
+    assert rows["gymcoach.sam"][1] is not None
+    # Neither is returned again by no_email_seed_handles
+    assert repo.no_email_seed_handles("fitness", limit=10) == []
