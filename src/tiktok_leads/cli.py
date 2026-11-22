@@ -33,6 +33,11 @@ async def async_main() -> None:
         type=Path,
         help="TikTok handles to inspect, one per line; already-checked ones are skipped, so re-run to continue",
     )
+    parser.add_argument(
+        "--enrich-no-email",
+        action="store_true",
+        help="Resumable pass over pre-vetted on-niche >=10k no_email creators using bio-link probing + /api/user/detail/ bioLink",
+    )
     parser.add_argument("--hashtag", action="append", default=[], help="TikTok hashtag to crawl")
     parser.add_argument("--limit", type=int, default=30, help="New (not yet evaluated) creators to inspect per hashtag")
     parser.add_argument("--init-db", action="store_true", help="Only initialize the SQLite schema")
@@ -124,6 +129,41 @@ async def async_main() -> None:
             await run_daemon(settings, repository, notifier, niches=niches, limit=args.limit)
         finally:
             repository.close()
+        return
+
+    if args.enrich_no_email:
+        handles = repository.no_email_seed_handles(args.niche, limit=args.limit)
+        logging.info(
+            "enriching %s pre-vetted no_email handle(s) for niche=%s",
+            len(handles),
+            args.niche,
+        )
+        if not handles:
+            print("No remaining pre-vetted no_email handles to enrich.")
+            repository.close()
+            return
+        notifier = build_notifier(settings)
+        inserted = 0
+        try:
+            async with build_source(settings) as source:
+                inserted = await scrape_handles(
+                    source,
+                    repository,
+                    notifier,
+                    handles=handles,
+                    niche=args.niche,
+                    min_followers=settings.min_followers,
+                    min_average_views=settings.min_average_views,
+                    max_followers=settings.max_followers,
+                    found_via="enrich:bio_link",
+                )
+        except TikTokBlockedError as error:
+            logging.warning("stopped early because TikTok is blocking requests: %s", error)
+            print(f"Stopped early due to block. Inserted {inserted} new lead(s).")
+            raise SystemExit(2) from None
+        finally:
+            repository.close()
+        print(f"Enriched {len(handles)} handle(s); inserted {inserted} new lead(s).")
         return
 
     if args.handles_file:

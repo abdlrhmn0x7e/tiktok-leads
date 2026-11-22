@@ -321,6 +321,29 @@ class LeadRepository:
         ).fetchall()
         return [(str(row["handle"]), str(row["niche"])) for row in rows]
 
+    def no_email_seed_handles(self, niche: str, *, limit: int = 5000) -> list[str]:
+        """Pre-vetted on-niche >=10k creators (level-2 following seeds) that were
+        skipped as no_email and haven't been through bio-link enrichment yet.
+        Ordered oldest first so clean level-1-discovered seeds run first."""
+        rows = self.connection.execute(
+            """
+            SELECT fs.handle
+            FROM following_seeds fs
+            JOIN scraped_profiles sp ON sp.handle = fs.handle
+            LEFT JOIN influencers i
+              ON lower(replace(i.handle, '@', '')) = fs.handle AND i.platform = 'tiktok'
+            WHERE fs.niche = ?
+              AND fs.level = 2
+              AND sp.skip_reason = 'no_email'
+              AND coalesce(sp.found_via, '') != 'enrich:bio_link'
+              AND i.handle IS NULL
+            ORDER BY fs.added_at ASC
+            LIMIT ?
+            """,
+            (niche, limit),
+        ).fetchall()
+        return [str(row["handle"]) for row in rows]
+
     def mark_rechecked(self, handle: str) -> None:
         """A renamed creator is recorded under the new handle, so the old one
         would stay due for a recheck forever."""

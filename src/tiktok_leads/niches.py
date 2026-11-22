@@ -401,7 +401,7 @@ HARVEST_EXCLUDED: dict[str, re.Pattern[str]] = {
         r"|mom(?!ent)|(?<!maxi)mum|baby|pregnan|postpartum|dad(?!dy)|papa"
         r"|horse|equestrian|dog|canine|puppy|lash|salon|pilatesprincess"
         r"|pesas|entren|rutina|ejercici|gimnasio|adelgazar|musculacion|musculation|seance"
-        r"|entrainement|abnehmen|krafttraining|ernahrung|allenamento|palestra|treino"
+        r"|entrainement|abnehmen|krafttraining|ernahrung|frauen|muskel|allenamento|palestra|treino"
         r"|academia|emagrecer|antrenman|kuwait|dubai|habesha|espanol|latino|deutsch"
         r"|francais|italiano|brasil|polska|turkiye"
         r"|bargain|drsquatch"

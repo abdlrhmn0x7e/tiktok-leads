@@ -92,6 +92,7 @@ def build_source(settings: Settings) -> TikTokApiSource:
         recent_video_count=settings.effective_recent_video_count,
         min_followers=settings.min_followers,
         max_followers=settings.max_followers,
+        min_average_views=settings.min_average_views,
         skip_videos_without_email=settings.tiktok_skip_videos_without_email,
         skip_videos_below_min_followers=settings.tiktok_skip_videos_below_min_followers,
         headless=settings.tiktok_browser_headless,
@@ -112,6 +113,8 @@ def build_source(settings: Settings) -> TikTokApiSource:
         restart_session_between_hashtags=settings.tiktok_restart_session_between_hashtags,
         proxy_provider=proxy_provider,
         resolve_bio_link_emails=settings.resolve_bio_link_emails,
+        probe_no_email_bio_links=settings.probe_no_email_bio_links,
+        fetch_bio_link_via_detail=settings.fetch_bio_link_via_detail,
         bio_link_timeout_seconds=settings.bio_link_timeout_seconds,
         bio_link_max_fetches=settings.bio_link_max_fetches,
     )

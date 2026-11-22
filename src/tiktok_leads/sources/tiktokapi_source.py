@@ -18,11 +18,17 @@ from TikTokApi.exceptions import (
     NotFoundException,
 )
 
-from tiktok_leads.bio_links import bio_hints_link_page, emails_from_bio_links
+from tiktok_leads.bio_links import (
+    bio_hints_link_page,
+    bio_suggests_external_link,
+    emails_from_bio_links,
+    probe_handle_bio_links,
+)
 from tiktok_leads.db import FollowingState
 from tiktok_leads.email_extractor import extract_emails
 from tiktok_leads.models import CandidateProfile
-from tiktok_leads.niches import bio_on_niche, rejected_group, seed_bio_on_niche
+from tiktok_leads.niches import bio_on_niche, is_on_niche, rejected_group, seed_bio_on_niche
+from tiktok_leads.numbers import robust_average_view_count
 from tiktok_leads.sources.base import TikTokSource
 from tiktok_leads.sources.embed import fetch_embed, fetch_sec_uid
 
@@ -75,6 +81,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         recent_video_count: int,
         min_followers: int,
         max_followers: int | None = None,
+        min_average_views: int = 0,
         skip_videos_without_email: bool,
         skip_videos_below_min_followers: bool,
         headless: bool,
@@ -95,6 +102,8 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         restart_session_between_hashtags: bool,
         proxy_provider: Any | None,
         resolve_bio_link_emails: bool = True,
+        probe_no_email_bio_links: bool = True,
+        fetch_bio_link_via_detail: bool = True,
         bio_link_timeout_seconds: float = 10.0,
         bio_link_max_fetches: int = 2,
     ) -> None:
@@ -103,6 +112,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         self.recent_video_count = recent_video_count
         self.min_followers = min_followers
         self.max_followers = max_followers
+        self.min_average_views = min_average_views
         self.skip_videos_without_email = skip_videos_without_email
         self.skip_videos_below_min_followers = skip_videos_below_min_followers
         self.headless = headless
@@ -123,6 +133,8 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         self.restart_session_between_hashtags = restart_session_between_hashtags
         self.proxy_provider = proxy_provider
         self.resolve_bio_link_emails = resolve_bio_link_emails
+        self.probe_no_email_bio_links = probe_no_email_bio_links
+        self.fetch_bio_link_via_detail = fetch_bio_link_via_detail
         self.bio_link_timeout_seconds = bio_link_timeout_seconds
         self.bio_link_max_fetches = bio_link_max_fetches
         self.api: TikTokApi | None = None
@@ -513,6 +525,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                             bio=str(bio),
                             feed_hashtags=set(),
                             external_links=external_links,
+                            sec_uid=self._get(user, "secUid", default=None) or None,
                         )
                     else:
                         fetch = self._profile_from_user(handle, niche=niche)
@@ -729,9 +742,14 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             return candidate
         bio_emails = extract_emails(bio_text, *links)
         if self.skip_videos_without_email and bio is not None and not bio_emails:
-            # A bio that references a link page (Linktree etc.) or has a
-            # structured TikTok bioLink may hide its email one hop away.
-            if self.resolve_bio_link_emails and (links or bio_hints_link_page(bio_text)):
+            # A bio that references a link page (Linktree etc.), has a
+            # structured TikTok bioLink, or is a high-signal gym bio with a
+            # link-in-bio CTA may hide its email one hop away.
+            if self.resolve_bio_link_emails and (
+                links
+                or bio_hints_link_page(bio_text)
+                or self._worth_no_email_bio_link_probe(niche, bio_text)
+            ):
                 return None
             return candidate
         # A bio word or country-domain email in rejected_group always disqualifies
@@ -769,6 +787,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     bio=str(bio),
                     feed_hashtags=self._extract_hashtags(item),
                     external_links=external_links,
+                    sec_uid=self._get(author, "secUid", default=None) or None,
                 ),
                 handle=handle,
                 context=context,
@@ -805,6 +824,15 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             logger.exception("failed to fetch profile @%s%s", handle, suffix)
             return _Fetch(None, blocked=True)
 
+    def _worth_no_email_bio_link_probe(self, niche: str, bio: str) -> bool:
+        return (
+            self.resolve_bio_link_emails
+            and (self.probe_no_email_bio_links or self.fetch_bio_link_via_detail)
+            and bio_suggests_external_link(bio)
+            and seed_bio_on_niche(niche, bio)
+            and rejected_group(niche, bio, [], "") is None
+        )
+
     async def _profile_from_videos(
         self,
         *,
@@ -814,25 +842,33 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         bio: str,
         feed_hashtags: set[str],
         external_links: list[str] | None = None,
+        sec_uid: str | None = None,
     ) -> CandidateProfile:
         links = list(external_links or [])
         extra_emails: list[str] = []
-        if not extract_emails(bio, *links):
-            # Reached via the prefilter's link-page hint or bioLink: the email,
-            # if any, lives behind the link. Resolve before paying for videos.
-            extra_emails = await self._resolve_bio_link_emails(handle, bio, links)
-            if self.skip_videos_without_email and not extra_emails:
-                logger.info("skipping recent videos for @%s: no email behind bio link", handle)
-                return CandidateProfile(
-                    handle=handle,
-                    profile_url=f"https://www.tiktok.com/@{handle}",
-                    niche=niche,
-                    followers_count=followers,
-                    bio=bio,
-                    external_links=links,
-                    source="tiktokapi",
-                    discovered_hashtags=sorted(feed_hashtags),
-                )
+        has_bio_email = bool(extract_emails(bio, *links))
+        defer_link_probe = False
+        if not has_bio_email:
+            # First resolve any explicit URL already present in the bio / bioLink.
+            if links or bio_hints_link_page(bio):
+                extra_emails = await self._resolve_bio_link_emails(handle, bio, links)
+            if not extra_emails:
+                if self._worth_no_email_bio_link_probe(niche, bio):
+                    # Pre-qualify on free embed views + captions BEFORE probing
+                    # Linktree/Stan or calling /api/user/detail/.
+                    defer_link_probe = True
+                elif self.skip_videos_without_email:
+                    logger.info("skipping recent videos for @%s: no email behind bio link", handle)
+                    return CandidateProfile(
+                        handle=handle,
+                        profile_url=f"https://www.tiktok.com/@{handle}",
+                        niche=niche,
+                        followers_count=followers,
+                        bio=bio,
+                        external_links=links,
+                        source="tiktokapi",
+                        discovered_hashtags=sorted(feed_hashtags),
+                    )
             if extra_emails and rejected_group(niche, bio, [], extra_emails[0]) is not None:
                 return CandidateProfile(
                     handle=handle,
@@ -847,6 +883,19 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                 )
         views, captions, hashtags = await self._collect_recent_videos(handle)
         hashtags |= feed_hashtags
+
+        if defer_link_probe:
+            extra_emails, extra_links = await self._resolve_missing_email(
+                niche=niche,
+                handle=handle,
+                bio=bio,
+                views=views,
+                captions=captions,
+                sec_uid=sec_uid,
+            )
+            if extra_links:
+                links = [*links, *extra_links]
+
         return CandidateProfile(
             handle=handle,
             profile_url=f"https://www.tiktok.com/@{handle}",
@@ -860,6 +909,69 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             discovered_hashtags=sorted(hashtags),
             extra_emails=extra_emails,
         )
+
+    async def _resolve_missing_email(
+        self,
+        *,
+        niche: str,
+        handle: str,
+        bio: str,
+        views: list[int],
+        captions: list[str],
+        sec_uid: str | None = None,
+    ) -> tuple[list[str], list[str]]:
+        """For a creator with no bio email who already passed followers, verify
+        views + niche + English first, then try:
+          1) Zero-TikTok direct handle probe (linktr.ee / stan.store / bio.site)
+          2) Selective Playwright /api/user/detail/ to read TikTok's clickable bioLink.
+        """
+        if not self.resolve_bio_link_emails:
+            return [], []
+        avg_views = robust_average_view_count(views)
+        if (
+            avg_views is None
+            or avg_views < self.min_average_views
+            or not is_on_niche(niche, bio, captions)
+            or rejected_group(niche, bio, captions, "") is not None
+        ):
+            return [], []
+        extra_emails: list[str] = []
+        extra_links: list[str] = []
+        if self.probe_no_email_bio_links:
+            extra_emails = await asyncio.to_thread(
+                probe_handle_bio_links,
+                handle,
+                niche=niche,
+                timeout_seconds=min(6.0, self.bio_link_timeout_seconds),
+            )
+        if not extra_emails and self.fetch_bio_link_via_detail and self.api is not None:
+            detail_link = await self._fetch_bio_link_via_detail(handle, sec_uid=sec_uid)
+            if detail_link:
+                extra_links.append(detail_link)
+                extra_emails = await self._resolve_bio_link_emails(handle, "", [detail_link])
+        return extra_emails, extra_links
+
+    async def _fetch_bio_link_via_detail(self, handle: str, *, sec_uid: str | None = None) -> str | None:
+        """Read TikTok's clickable bioLink.link via /api/user/detail/ on the warm
+        Playwright session. Only called after a creator already passed followers,
+        views, gym niche, and English gates. Never raises on block/error."""
+        if self.api is None:
+            return None
+        try:
+            self.request_count += 1
+            resp = await self.api.make_request(
+                url="https://www.tiktok.com/api/user/detail/",
+                params={"uniqueId": handle, "secUid": sec_uid or ""},
+            )
+        except Exception as error:
+            logger.warning("bioLink detail lookup failed for @%s: %s", handle, error)
+            return None
+        user = self._get(self._get(resp or {}, "userInfo", default={}), "user", default={})
+        links = self._extract_bio_links(user)
+        if links:
+            logger.info("found TikTok bioLink for @%s: %s", handle, links[0])
+            return links[0]
+        return None
 
     async def _profile_from_user(self, handle: str, *, niche: str) -> CandidateProfile:
         """The whole profile from the embed page, one unsigned request. The
@@ -878,8 +990,20 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                 source="tiktokapi",
             )
         extra_emails: list[str] = []
-        if embed.followers >= self.min_followers and not extract_emails(embed.bio):
+        external_links: list[str] = []
+        in_follower_range = embed.followers >= self.min_followers and (
+            self.max_followers is None or embed.followers <= self.max_followers
+        )
+        if in_follower_range and not extract_emails(embed.bio):
             extra_emails = await self._resolve_bio_link_emails(embed.handle, embed.bio, [])
+            if not extra_emails:
+                extra_emails, external_links = await self._resolve_missing_email(
+                    niche=niche,
+                    handle=embed.handle,
+                    bio=embed.bio,
+                    views=embed.views,
+                    captions=embed.captions,
+                )
         return CandidateProfile(
             handle=embed.handle,
             profile_url=f"https://www.tiktok.com/@{embed.handle}",
@@ -888,6 +1012,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             recent_video_views=embed.views,
             recent_video_captions=embed.captions,
             bio=embed.bio,
+            external_links=external_links,
             source="tiktokapi",
             discovered_hashtags=sorted(
                 {tag.lower() for caption in embed.captions for tag in _CAPTION_HASHTAG.findall(caption)}

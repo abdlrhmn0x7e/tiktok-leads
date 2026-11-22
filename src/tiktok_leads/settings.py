@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     # Follow a creator's bio link (Linktree, Beacons, Stan…) when the bio has
     # no email — these are ordinary pages fetched directly, no proxy/TikTok.
     resolve_bio_link_emails: bool = True
+    # For pre-qualified gym-bio creators with no email in bio text and a
+    # link-in-bio CTA, probe Linktree/Stan/Bio.site by handle (zero TikTok reqs)
+    # and fall back to /api/user/detail/ bioLink ONLY after views+niche pass.
+    probe_no_email_bio_links: bool = True
+    fetch_bio_link_via_detail: bool = True
     bio_link_timeout_seconds: float = 10.0
     bio_link_max_fetches: int = 2  # pages fetched per profile at most
     recheck_enabled: bool = True  # re-check stale profiles for newly-added emails

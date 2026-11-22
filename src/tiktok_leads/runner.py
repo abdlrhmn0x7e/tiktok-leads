@@ -167,7 +167,7 @@ async def scrape_following(
     # Cap following-graph expansion at depth 2: only level-1 (leads-hub) seeds
     # promote new level-2 seeds, preventing unbounded off-niche drift.
     on_seed = (
-        (lambda handle, sec_uid: repository.add_found_seed(handle, current.niche, sec_uid, commit=False))
+        (lambda handle, sec_uid: repository.add_found_seed(handle, current.niche, sec_uid))
         if current.level == 1
         else None
     )
@@ -235,9 +235,6 @@ def _add_lead_source(
     logger.info("added source %s to @%s (niche=%s)", found_via, lead.handle, lead.niche)
 
 
-_COMMIT_BATCH_SIZE = 50
-
-
 async def _process_candidates(
     candidates: AsyncIterable[CandidateProfile],
     repository: LeadRepository,
@@ -250,7 +247,7 @@ async def _process_candidates(
     exclude_handles: set[str] | None = None,
 ) -> int:
     inserted = 0
-    pending_writes = 0
+    pending_writes = False
     try:
         async for candidate in candidates:
             average_views = candidate.average_views
@@ -298,25 +295,26 @@ async def _process_candidates(
                     niche=candidate.niche,
                     commit=False,
                 )
-            pending_writes += 1
+            pending_writes = True
 
+            # Commit per candidate so SQLite WAL write locks are never held across
+            # the next `await` (network/Playwright I/O) when another scraper runs
+            # concurrently against the same database.
             if evaluation.lead is None:
+                repository.commit()
+                pending_writes = False
                 logger.info("skipped @%s: %s", candidate.handle or "unknown", evaluation.skip_reason)
-                if pending_writes >= _COMMIT_BATCH_SIZE:
-                    repository.commit()
-                    pending_writes = 0
                 continue
 
             lead = replace(evaluation.lead, found_via=found_via)
             if duplicate_email:
+                repository.commit()
+                pending_writes = False
                 logger.info("skipped @%s: email already exists (%s)", lead.handle, lead.email)
-                if pending_writes >= _COMMIT_BATCH_SIZE:
-                    repository.commit()
-                    pending_writes = 0
                 continue
 
             if repository.insert_lead(lead):
-                pending_writes = 0
+                pending_writes = False
                 logger.info("inserted @%s email=%s", lead.handle, lead.email)
                 logger.info("sending notification for @%s", lead.handle)
                 try:
@@ -327,6 +325,9 @@ async def _process_candidates(
                     repository.mark_notified(lead.email, lead.platform)
                     logger.info("notification marked sent for @%s", lead.handle)
                 inserted += 1
+            else:
+                repository.commit()
+                pending_writes = False
     finally:
         if pending_writes:
             repository.commit()
