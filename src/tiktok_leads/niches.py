@@ -211,11 +211,9 @@ NICHE_SEARCH_TERMS: dict[str, tuple[str, ...]] = {
         "fitness coach",
         "personal trainer",
         "online fitness coach",
-        "weight loss coach",
-        "fat loss coach",
-        "fitness nutritionist",
-        "nutrition coach",
         "strength coach",
+        "bodybuilding coach",
+        "hypertrophy coach",
         "pilates instructor",
         "home workout coach",
     ),
@@ -381,7 +379,7 @@ HARVEST_STEMS: dict[str, tuple[str, ...]] = {
         "gym", "fitness", "fittok", "fitfam", "workout", "lifting", "weightlift", "deadlift",
         "muscle", "glute", "legday", "bicep", "pilates", "calisthenic", "bodybuild",
         "powerlift", "strength", "hiit",
-        "weightloss", "fatloss", "macro", "caloriedeficit", "nutrition",
+        "macro", "caloriedeficit",
         # Lift, split, and explicit gym-coaching stems.
         "squat", "benchpress", "chestday", "armday", "shoulderday", "backday", "pushday",
         "pullday", "pushpull", "physique", "bulking", "leanbulk", "kettlebell", "dumbbell",
@@ -396,13 +394,14 @@ HARVEST_STEMS: dict[str, tuple[str, ...]] = {
 HARVEST_EXCLUDED: dict[str, re.Pattern[str]] = {
     "fitness": re.compile(
         r"recipe|meal|food|cook|bake|snack|breakfast|dinner|lunch|vegan|keto|whatieat|protein"
+        r"|dietitian|dietician|nutritionist|supplement"
         r"|running|runner|marathon|hyrox|crossfit|boxing|football|soccer|triathl"
         r"|gymnast|yoga|softball|baseball|tennis|volleyball|golf|hockey|pickleball"
         r"|mom(?!ent)|(?<!maxi)mum|baby|pregnan|postpartum|dad(?!dy)|papa"
         r"|horse|equestrian|dog|canine|puppy|lash|salon|pilatesprincess"
         r"|pesas|entren|rutina|ejercici|gimnasio|adelgazar|musculacion|musculation|seance"
         r"|entrainement|abnehmen|krafttraining|ernahrung|frauen|muskel|allenamento|palestra|treino"
-        r"|academia|emagrecer|antrenman|kuwait|dubai|habesha|espanol|latino|deutsch"
+        r"|academia|emagrecer|antrenman|trening|kosthold|styrka|kuwait|dubai|habesha|espanol|latino|deutsch"
         r"|francais|italiano|brasil|polska|turkiye"
         r"|bargain|drsquatch"
     ),
@@ -451,7 +450,7 @@ CONTENT_TERMS: dict[str, re.Pattern[str]] = {
         r"|pilates|calisthenics\w*|strength\w*|muscles?\w*|glute(?!n)\w*|abs"
         r"|leg ?day|chest ?day|back ?day|arm ?day|shoulder ?day|push ?day|pull ?day"
         r"|squats?|deadlift\w*|bench(?:press)?|hypertrophy|bulk(?:ing)?|shred\w*|gains|macros?"
-        r"|calorie ?deficit|fat ?loss|weight ?loss\w*|ifbb|cardio|hiit|mobility|nutrition\w*"
+        r"|calorie ?deficit|ifbb|cardio|hiit|mobility"
         r"|barbell|dumbbell|kettlebell|smith ?machine|triceps?|biceps?|hamstrings?"
         r"|dfyne|aybl|youngla|alphalete|oner ?active|teveo|nvgtn|ekkovision"
         r")(?![a-z])"
@@ -504,14 +503,19 @@ _FOOD = (
 )
 _FAMILY = (
     r"mom(?:s|my|mies|life)?|mum(?:s|my)?|dad(?:s|dy)?|papa|father(?:hood)?|toddlers?|baby|husband|wife"
-    r"|vlogs?|grwm|day in my life|outfits?|makeup|skincare|lash(?:es| ?lift)?|salon|medspa"
+    r"|pregnan\w*|prenatal|postpartum"
+    r"|vlogs?|grwm|day in my life|outfits?|fashion|makeup|skincare|lash(?:es| ?lift)?|salon|medspa"
     r"|natural hair|pop culture|skits?"
 )
 _NON_GYM = (
     r"dog ?train\w*|canine|k9|pupp(?:y|ies)|horse ?train\w*|equestrian|stable"
     r"|songs? ?promo|dm for (?:songs? )?promo|spotify|telegram|kik|promotions"
-    r"|relationship coach\w*|dating coach\w*|avoidant|psycholog(?:y|ist)|therapist"
-    r"|biohacking|longevity|reiki"
+    r"|relationship coach\w*|dating coach\w*|avoidant|psycholog(?:y|ist)|therapist|mental health"
+    r"|biohacking|longevity|reiki|holistic|juic(?:e|ing)(?: specialist| cleanse|s)?|detox|herbalist"
+    r"|dietitian\w*|dietician\w*|registered dietitian|rdn|nutritionist\w*"
+    r"|affiliate market\w*|tiktok shop|plastic surg\w*|aesthetician|islam(?:ic)?|ramadan|suhoor"
+    r"|bodybuilding supplements|fitness supplements|supplement brand|supplement company"
+    r"|shop at the link|official store|worldwide shipping"
     r"|troll ?face\w*|coldest moments|best moments|viral clips|daily clips|clip(?:s)? page|meme(?:s)? page"
 )
 _CLIP_FARM_TAGS = re.compile(r"(?i)#(?:trollface\w*|unfreez\w*|memepage)\b")
@@ -537,7 +541,7 @@ _NON_LATIN = re.compile(
     r"\u1100-\u11FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF\u1200-\u137F\u0370-\u03FF]"
 )
 _NON_EN_DIACRITICS = re.compile(
-    r"[ßäöüÄÖÜñÑ¿¡çÇãõÃÕłŁąęśźżćńĄĘŚŹŻĆŃşğıŞĞİăîșțĂÎȘȚěščřžůĚŠČŘŽŮ]"
+    r"[ßäöüÄÖÜåÅæÆøØñÑ¿¡çÇãõÃÕłŁąęśźżćńĄĘŚŹŻĆŃşğıŞĞİăîșțĂÎȘȚěščřžůĚŠČŘŽŮ]"
 )
 _NON_EN_WORDS = re.compile(
     r"(?i)(?<![a-z])(?:"
@@ -557,6 +561,9 @@ _NON_EN_WORDS = re.compile(
     r"|allenamento|palestra|femminile|scopri|miei|ricette|motivazione"
     # Dutch
     r"|een|voor|niet|ook|maar|zijn|naar|mijn|jouw|geen|meer|weer|sporten|afvallen"
+    # Nordic (Norwegian / Swedish / Danish)
+    r"|jeg|deg|ikke|og|til|trening\w*|kosthold|sterkere|hjelper|velg|uker|[øo]kter"
+    r"|jag|och|att|inte|tr[äa]ning\w*|styrka|hvordan|eller|svarer|m[åa]ned|kroppen"
     # Polish
     r"|jest|nie|si[eę]|dla|jak|tylko|moje|tw[oó]j|trening|si[lł]ownia|odchudzanie"
     # Turkish

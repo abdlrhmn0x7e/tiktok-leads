@@ -315,6 +315,7 @@ def test_hashtag_prefilter_skips_embed_for_rejected_group_and_updates_exclude_ha
 
 
 def test_pinned_viral_outliers_do_not_inflate_average_views_and_troll_pages_rejected():
+    from tiktok_leads.niches import is_on_niche
     from tiktok_leads.numbers import robust_average_view_count
 
     # 3 pinned viral videos + 10 low-view videos (exact @skulltok1 distribution)
@@ -333,6 +334,22 @@ def test_pinned_viral_outliers_do_not_inflate_average_views_and_troll_pages_reje
         ["#MoneySavingTips #gymer #unfreez", "Hulk version #trollface #gymer #unfreez"],
         "skulltok1@gmail.com",
     ) is not None
+
+    # Holistic / juicing / detox bios rejected even if they mention "meal plans/workouts"
+    assert rejected_group(
+        "fitness",
+        "Holistic nutritionist 🧃\nCertified juice specialist 🫐\nMeal plans/workouts ⬇️",
+        ["LOW IRON? Muscle weakness and reduced workout endurance. LET'S MAKE A WELLNESS JUICE!"],
+        "info@elitejuicez.com",
+    ) is not None
+
+    # Dietitians, supplement brands, affiliate/fashion pages, mental-health/Ramadan lifestyle, Nordic creators
+    assert rejected_group("fitness", "Weight loss dietitian\nLose fat & boost metabolism", [], "a@b.com") is not None
+    assert rejected_group("fitness", "High-Quality Bodybuilding Supplements\nShop at the link below", [], "info@hugesupplements.com") is not None
+    assert rejected_group("fitness", "Affiliate Marketer | Nurse Life | Fitness | Fashion", [], "a@b.com") is not None
+    assert rejected_group("fitness", "fitness tips\nislam + mental health tips", [], "a@b.com") is not None
+    assert rejected_group("fitness", "Jeg hjelper deg å bli sterkere\nTrening • kosthold • coaching", [], "a@b.com") == "non-english creator"
+    assert not is_on_niche("fitness", "lil bit western, weightloss, & chaos", ["Weightloss transformation", "Weightloss motivation", "Weightloss journey"])
 
 
 def test_enrich_preserves_original_found_via_and_tracks_enrichment(tmp_path):
