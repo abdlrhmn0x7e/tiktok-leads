@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS scraped_profiles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_scraped_profiles_niche ON scraped_profiles(niche);
+CREATE INDEX IF NOT EXISTS idx_scraped_profiles_last_seen ON scraped_profiles(last_seen_at);
 
 -- Instagram creators already evaluated, kept apart from scraped_profiles so
 -- the same handle on both platforms is checked once per platform.
@@ -115,14 +116,21 @@ class FollowingSeed:
     sec_uid: str | None
     state: FollowingState
     cursor: int
+    level: int = 1
 
 
 class LeadRepository:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.database_path)
+        self.connection = sqlite3.connect(self.database_path, timeout=30.0)
         self.connection.row_factory = sqlite3.Row
+        self.connection.execute("PRAGMA journal_mode=WAL")
+        self.connection.execute("PRAGMA synchronous=NORMAL")
+        self.connection.execute("PRAGMA busy_timeout=30000")
+
+    def commit(self) -> None:
+        self.connection.commit()
 
     def initialize(self) -> None:
         self.connection.executescript(SCHEMA)
@@ -226,6 +234,7 @@ class LeadRepository:
         source: str,
         skip_reason: str | None = None,
         found_via: str | None = None,
+        commit: bool = True,
     ) -> None:
         normalized_handle = handle.removeprefix("@").lower()
         self.connection.execute(
@@ -241,7 +250,8 @@ class LeadRepository:
             """,
             (normalized_handle, niche, source, skip_reason, found_via),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
     def seen_instagram_handles(self) -> set[str]:
         rows = self.connection.execute(
@@ -351,13 +361,14 @@ class LeadRepository:
         )
         self.connection.commit()
 
-    def add_found_seed(self, handle: str, niche: str, sec_uid: str | None) -> None:
+    def add_found_seed(self, handle: str, niche: str, sec_uid: str | None, *, commit: bool = True) -> None:
         """An on-niche creator found in a seed's list. Crawled after every leads-hub seed."""
         self.connection.execute(
             "INSERT OR IGNORE INTO following_seeds (handle, niche, sec_uid, level) VALUES (?, ?, ?, 2)",
             (handle.removeprefix("@").lower(), niche, sec_uid),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
     def due_following_seeds(self, niche: str, *, limit: int) -> list[str]:
         rows = self.connection.execute(
@@ -368,7 +379,7 @@ class LeadRepository:
 
     def following_seed(self, handle: str) -> FollowingSeed | None:
         row = self.connection.execute(
-            "SELECT handle, niche, sec_uid, state, cursor FROM following_seeds WHERE handle = ?",
+            "SELECT handle, niche, sec_uid, state, cursor, level FROM following_seeds WHERE handle = ?",
             (handle,),
         ).fetchone()
         return FollowingSeed(**row) if row else None
@@ -386,10 +397,10 @@ class LeadRepository:
         )
         self.connection.commit()
 
-    def record_discovered_hashtags(self, hashtags: list[str], *, niche: str) -> None:
+    def record_discovered_hashtags(self, hashtags: list[str], *, niche: str, commit: bool = True) -> None:
         for raw in hashtags:
             tag = raw.removeprefix("#").strip().lower()
-            if not tag or not is_harvestable_hashtag(tag):
+            if not tag or not is_harvestable_hashtag(tag, niche):
                 continue
             self.connection.execute(
                 """
@@ -401,7 +412,8 @@ class LeadRepository:
                 """,
                 (tag, niche),
             )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
     def due_hashtags(
         self,
@@ -464,6 +476,7 @@ class LeadRepository:
 
             DROP TABLE scraped_profiles_old;
             CREATE INDEX IF NOT EXISTS idx_scraped_profiles_niche ON scraped_profiles(niche);
+CREATE INDEX IF NOT EXISTS idx_scraped_profiles_last_seen ON scraped_profiles(last_seen_at);
             """
         )
 

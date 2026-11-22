@@ -22,7 +22,7 @@ from tiktok_leads.bio_links import bio_hints_link_page, emails_from_bio_links
 from tiktok_leads.db import FollowingState
 from tiktok_leads.email_extractor import extract_emails
 from tiktok_leads.models import CandidateProfile
-from tiktok_leads.niches import bio_on_niche, rejected_group
+from tiktok_leads.niches import bio_on_niche, rejected_group, seed_bio_on_niche
 from tiktok_leads.sources.base import TikTokSource
 from tiktok_leads.sources.embed import fetch_embed, fetch_sec_uid
 
@@ -74,6 +74,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         num_sessions: int,
         recent_video_count: int,
         min_followers: int,
+        max_followers: int | None = None,
         skip_videos_without_email: bool,
         skip_videos_below_min_followers: bool,
         headless: bool,
@@ -84,6 +85,10 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         suppress_resource_load_types: list[str] | None,
         request_delay_seconds: float,
         request_jitter_seconds: float,
+        embed_delay_seconds: float = 0.5,
+        embed_jitter_seconds: float = 0.3,
+        following_early_stop_pages: int = 2,
+        following_min_on_niche_per_stop: int = 2,
         max_consecutive_blocked_profiles: int,
         block_cooldown_seconds: float,
         restart_session_on_block: bool,
@@ -97,6 +102,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         self.num_sessions = max(1, num_sessions)
         self.recent_video_count = recent_video_count
         self.min_followers = min_followers
+        self.max_followers = max_followers
         self.skip_videos_without_email = skip_videos_without_email
         self.skip_videos_below_min_followers = skip_videos_below_min_followers
         self.headless = headless
@@ -107,6 +113,10 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         self.suppress_resource_load_types = suppress_resource_load_types or None
         self.request_delay_seconds = request_delay_seconds
         self.request_jitter_seconds = request_jitter_seconds
+        self.embed_delay_seconds = embed_delay_seconds
+        self.embed_jitter_seconds = embed_jitter_seconds
+        self.following_early_stop_pages = following_early_stop_pages
+        self.following_min_on_niche_per_stop = following_min_on_niche_per_stop
         self.max_consecutive_blocked_profiles = max_consecutive_blocked_profiles
         self.block_cooldown_seconds = block_cooldown_seconds
         self.restart_session_on_block = restart_session_on_block
@@ -119,9 +129,11 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         self._feed_block_streak = 0
         # Kept across calls: the daemon rechecks one handle per call.
         self._handle_block_streak = 0
-        # TikTok requests made over this source's life; the daemon paces its
-        # rest by how many a cycle made.
+        # Signed Playwright API requests made over this source's life; the daemon
+        # paces its rest by how many a cycle made. Unsigned embed fetches are
+        # tracked separately so they don't inflate Playwright cycle rest.
         self.request_count = 0
+        self.embed_request_count = 0
 
     async def __aenter__(self) -> "TikTokApiSource":
         await self._start_session()
@@ -216,7 +228,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     raise TikTokBlockedError(
                         f"{self.max_consecutive_blocked_profiles} profile checks in a row failed"
                     )
-            await self._delay()
+            await self._embed_delay()
 
     async def profiles_from_hashtag(
         self,
@@ -234,7 +246,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         crawl found, and only when the feed ran without a feed error."""
         api = self._api()
         tag = hashtag.removeprefix("#").strip()
-        excluded = {handle.removeprefix("@").lower() for handle in exclude_handles or set()}
+        excluded = self._normalize_excluded(exclude_handles)
         seen_handles: set[str] = set()
         consecutive_blocked = 0
         blocked = False
@@ -264,7 +276,6 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                 if prefiltered is not None:
                     # Disqualified using data already in the feed — zero requests spent.
                     yield prefiltered
-                    await self._feed_skip_delay()
                     continue
 
                 result = await self._fetch_candidate(item, niche=niche, handle=handle, context=f"from #{tag}")
@@ -276,7 +287,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     if await self._recover_if_blocked(consecutive_blocked, context=f"#{tag}"):
                         blocked = True
                         raise TikTokBlockedError(f"sustained TikTok blocking on #{tag}")
-                await self._delay()
+                await self._embed_delay()
             if on_finished is not None:
                 on_finished(len(seen_handles))
         except TikTokBlockedError:
@@ -304,7 +315,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         """`on_finished` gets the number of not-yet-evaluated creators the
         search returned, and only when the listing ran without a feed error."""
         api = self._api()
-        excluded = {handle.removeprefix("@").lower() for handle in exclude_handles or set()}
+        excluded = self._normalize_excluded(exclude_handles)
         seen_handles: set[str] = set()
         consecutive_blocked = 0
         blocked = False
@@ -326,14 +337,18 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     self._get(user_info, "follower_count", "followerCount", default=None)
                 )
                 bio = self._get(user_info, "signature", default=None)
+                external_links = self._extract_bio_links(user_info)
                 prefiltered = self._prefiltered_candidate(
-                    niche=niche, handle=handle, followers=followers, bio=bio
+                    niche=niche,
+                    handle=handle,
+                    followers=followers,
+                    bio=bio,
+                    external_links=external_links,
                 )
                 if prefiltered is not None:
                     # Disqualified using data already in the search payload —
                     # zero requests spent.
                     yield prefiltered
-                    await self._feed_skip_delay()
                     continue
 
                 if followers is not None and bio is not None:
@@ -343,6 +358,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                         followers=followers,
                         bio=str(bio),
                         feed_hashtags=set(),
+                        external_links=external_links,
                     )
                 else:
                     fetch = self._profile_from_user(handle, niche=niche)
@@ -359,7 +375,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     if await self._recover_if_blocked(consecutive_blocked, context=f"search '{query}'"):
                         blocked = True
                         raise TikTokBlockedError(f"sustained TikTok blocking on search '{query}'")
-                await self._delay()
+                await self._embed_delay()
             if on_finished is not None:
                 on_finished(len(seen_handles))
         except TikTokBlockedError:
@@ -392,13 +408,14 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         creator worth crawling in turn, with or without an email."""
         api = self._api()
         context = f"@{seed}'s following list"
-        excluded = {handle.removeprefix("@").lower() for handle in exclude_handles or set()}
+        excluded = self._normalize_excluded(exclude_handles)
         seen_handles: set[str] = set()
         consecutive_blocked = 0
+        on_niche_seen = 0
         blocked = False
         try:
             if sec_uid is None:
-                self.request_count += 2  # embed page + video page
+                self.embed_request_count += 2  # embed page + video page
                 sec_uid = await asyncio.to_thread(fetch_sec_uid, seed)
                 if sec_uid is None:
                     logger.info("no following list for @%s: creator gone or has no videos", seed)
@@ -435,12 +452,21 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                         continue
                     followers = self._parse_int(self._get(stats, "followerCount", default=None))
                     bio = self._get(user, "signature", default=None)
+                    bio_text = str(bio or "")
+                    external_links = self._extract_bio_links(user)
+                    is_gym_account = (
+                        (followers or 0) >= self.min_followers
+                        and bio_on_niche(niche, bio_text)
+                        and rejected_group(niche, bio_text, [], "") is None
+                    )
+                    if is_gym_account:
+                        on_niche_seen += 1
                     if (
                         on_seed is not None
                         and (followers or 0) >= self.min_followers
                         and not self._get(user, "privateAccount", default=False)
-                        and bio_on_niche(niche, str(bio or ""))
-                        and rejected_group(niche, str(bio or ""), [], "") is None
+                        and seed_bio_on_niche(niche, bio_text)
+                        and rejected_group(niche, bio_text, [], "") is None
                     ):
                         on_seed(normalized_handle, self._get(user, "secUid", default=None) or None)
                     if normalized_handle in excluded:
@@ -451,15 +477,32 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     seen_handles.add(normalized_handle)
 
                     prefiltered = self._prefiltered_candidate(
-                        niche=niche, handle=handle, followers=followers, bio=bio
+                        niche=niche,
+                        handle=handle,
+                        followers=followers,
+                        bio=bio,
+                        external_links=external_links,
+                        check_rejected_group=False,
                     )
                     if prefiltered is not None:
                         # No pause: the skip made no request, and list pages stay a full delay apart.
                         yield prefiltered
                         continue
                     # Left unrecorded: it was not evaluated, and a hashtag crawl may still reach it.
-                    if not bio_on_niche(niche, str(bio or "")):
+                    if not bio_on_niche(niche, bio_text):
                         logger.info("skipping @%s from %s: bio is not about %s", handle, context, niche)
+                        continue
+                    bio_emails = extract_emails(bio_text, *external_links)
+                    if rejected_group(niche, bio_text, [], bio_emails[0] if bio_emails else "") is not None:
+                        yield CandidateProfile(
+                            handle=handle,
+                            profile_url=f"https://www.tiktok.com/@{handle}",
+                            niche=niche,
+                            followers_count=followers,
+                            bio=bio_text,
+                            external_links=external_links,
+                            source="tiktokapi",
+                        )
                         continue
 
                     if followers is not None and bio is not None:
@@ -469,6 +512,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                             followers=followers,
                             bio=str(bio),
                             feed_hashtags=set(),
+                            external_links=external_links,
                         )
                     else:
                         fetch = self._profile_from_user(handle, niche=niche)
@@ -481,9 +525,23 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                         if await self._recover_if_blocked(consecutive_blocked, context=context):
                             blocked = True
                             raise TikTokBlockedError(f"sustained TikTok blocking on {context}")
-                    await self._delay()
+                    await self._embed_delay()
                 cursor = self._parse_int(resp.get("minCursor")) or 0
                 has_more = bool(resp.get("hasMore", False)) and bool(users) and cursor != 0
+                if (
+                    has_more
+                    and self.following_early_stop_pages > 0
+                    and (page + 1) >= self.following_early_stop_pages
+                    and on_niche_seen < self.following_min_on_niche_per_stop
+                ):
+                    logger.info(
+                        "stopping %s early after %s page(s): only %s on-niche account(s)",
+                        context,
+                        page + 1,
+                        on_niche_seen,
+                    )
+                    on_progress(sec_uid, cursor, "done")
+                    return
                 on_progress(sec_uid, cursor, "due" if has_more else "done")
                 if not has_more:
                     return
@@ -520,8 +578,12 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             self.request_count += 1
             await challenge.info()
         found = 0
+        page = 0
         raw_cap = limit * MAX_FEED_ITEMS_PER_NEW_CANDIDATE
         while (inspected.value if inspected is not None else found) < limit and found < raw_cap:
+            if page:
+                await self._feed_page_delay()
+            page += 1
             self.request_count += 1
             resp = await api.make_request(
                 url="https://www.tiktok.com/api/challenge/item_list/",
@@ -629,6 +691,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             followers=followers,
             bio=self._get(author, "signature", default=None),
             discovered_hashtags=sorted(self._extract_hashtags(item)),
+            external_links=self._extract_bio_links(author),
         )
 
     def _prefiltered_candidate(
@@ -639,30 +702,45 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         followers: int | None,
         bio: Any,
         discovered_hashtags: list[str] | None = None,
+        external_links: list[str] | None = None,
+        check_rejected_group: bool = True,
     ) -> CandidateProfile | None:
-        """Disqualify a creator using only feed/search payload data (zero
-        requests). Returns a candidate the filters will reject, or None when
-        the creator either passes the prefilters or the payload lacks the data
-        to decide."""
+        """Disqualify a creator using only feed/search/following payload data
+        (zero requests). Returns a candidate the filters will reject, or None
+        when the creator either passes the prefilters or the payload lacks the
+        data to decide."""
         if followers is None:
             return None
+        links = list(external_links or [])
+        bio_text = str(bio or "")
         candidate = CandidateProfile(
             handle=handle,
             profile_url=f"https://www.tiktok.com/@{handle}",
             niche=niche,
             followers_count=followers,
-            bio=str(bio or ""),
+            bio=bio_text,
+            external_links=links,
             source="tiktokapi",
             discovered_hashtags=discovered_hashtags or [],
         )
         if self.skip_videos_below_min_followers and followers < self.min_followers:
             return candidate
-        if self.skip_videos_without_email and bio is not None and not extract_emails(str(bio)):
-            # A bio that references a link page (Linktree etc.) may hide its
-            # email one hop away — worth the full fetch to find out. Otherwise
-            # the recheck flywheel re-evaluates the profile later.
-            if self.resolve_bio_link_emails and bio_hints_link_page(str(bio)):
+        if self.max_followers is not None and followers > self.max_followers:
+            return candidate
+        bio_emails = extract_emails(bio_text, *links)
+        if self.skip_videos_without_email and bio is not None and not bio_emails:
+            # A bio that references a link page (Linktree etc.) or has a
+            # structured TikTok bioLink may hide its email one hop away.
+            if self.resolve_bio_link_emails and (links or bio_hints_link_page(bio_text)):
                 return None
+            return candidate
+        # A bio word or country-domain email in rejected_group always disqualifies
+        # regardless of recent captions, so skip the embed fetch immediately.
+        if (
+            check_rejected_group
+            and bio is not None
+            and rejected_group(niche, bio_text, [], bio_emails[0] if bio_emails else "") is not None
+        ):
             return candidate
         return None
 
@@ -681,6 +759,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         stats = self._get(item, "authorStats", "author_stats", default={})
         followers = self._parse_int(self._get(stats, "followerCount", "follower_count", default=None))
         bio = self._get(author, "signature", default=None) if isinstance(author, dict) else None
+        external_links = self._extract_bio_links(author)
         if followers is not None and bio is not None:
             return await self._safe_fetch(
                 self._profile_from_videos(
@@ -689,6 +768,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     followers=followers,
                     bio=str(bio),
                     feed_hashtags=self._extract_hashtags(item),
+                    external_links=external_links,
                 ),
                 handle=handle,
                 context=context,
@@ -733,12 +813,14 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         followers: int,
         bio: str,
         feed_hashtags: set[str],
+        external_links: list[str] | None = None,
     ) -> CandidateProfile:
+        links = list(external_links or [])
         extra_emails: list[str] = []
-        if not extract_emails(bio):
-            # Reached via the prefilter's link-page hint: the email, if any,
-            # lives behind the bio's link. Resolve before paying for videos.
-            extra_emails = await self._resolve_bio_link_emails(handle, bio, [])
+        if not extract_emails(bio, *links):
+            # Reached via the prefilter's link-page hint or bioLink: the email,
+            # if any, lives behind the link. Resolve before paying for videos.
+            extra_emails = await self._resolve_bio_link_emails(handle, bio, links)
             if self.skip_videos_without_email and not extra_emails:
                 logger.info("skipping recent videos for @%s: no email behind bio link", handle)
                 return CandidateProfile(
@@ -747,9 +829,21 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     niche=niche,
                     followers_count=followers,
                     bio=bio,
-                    external_links=[],
+                    external_links=links,
                     source="tiktokapi",
                     discovered_hashtags=sorted(feed_hashtags),
+                )
+            if extra_emails and rejected_group(niche, bio, [], extra_emails[0]) is not None:
+                return CandidateProfile(
+                    handle=handle,
+                    profile_url=f"https://www.tiktok.com/@{handle}",
+                    niche=niche,
+                    followers_count=followers,
+                    bio=bio,
+                    external_links=links,
+                    source="tiktokapi",
+                    discovered_hashtags=sorted(feed_hashtags),
+                    extra_emails=extra_emails,
                 )
         views, captions, hashtags = await self._collect_recent_videos(handle)
         hashtags |= feed_hashtags
@@ -761,7 +855,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             recent_video_views=views,
             recent_video_captions=captions,
             bio=bio,
-            external_links=[],
+            external_links=links,
             source="tiktokapi",
             discovered_hashtags=sorted(hashtags),
             extra_emails=extra_emails,
@@ -771,7 +865,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         """The whole profile from the embed page, one unsigned request. The
         signed user-detail call it replaces failed for every profile on
         2026-11-09."""
-        self.request_count += 1
+        self.embed_request_count += 1
         embed = await asyncio.to_thread(fetch_embed, handle)
         if embed is None:
             # Deleted or renamed. Returned without followers so the runner
@@ -819,7 +913,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         """Recent videos from the embed page, one unsigned request. The signed
         user-videos call it replaces was refused for every creator from
         2026-11-12 01:20."""
-        self.request_count += 1
+        self.embed_request_count += 1
         embed = await asyncio.to_thread(fetch_embed, handle)
         if embed is None:
             return [], [], set()
@@ -833,10 +927,46 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         if delay > 0:
             await asyncio.sleep(delay)
 
+    async def _embed_delay(self) -> None:
+        if self.request_delay_seconds <= 0 and self.request_jitter_seconds <= 0:
+            return
+        delay = self.embed_delay_seconds
+        if self.embed_jitter_seconds > 0:
+            delay += random.uniform(0, self.embed_jitter_seconds)
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+    async def _feed_page_delay(self) -> None:
+        if self.request_delay_seconds <= 0 and self.request_jitter_seconds <= 0:
+            return
+        await asyncio.sleep(random.uniform(0.5, 1.2))
+
     async def _feed_skip_delay(self) -> None:
-        # A prefiltered skip made no requests; a token pause just keeps feed
-        # pagination from firing back-to-back when a whole page gets skipped.
-        await asyncio.sleep(random.uniform(0.2, 0.8))
+        # Kept as a no-op compatibility hook for tests; paging is paced once per
+        # page in _feed_page_delay instead of sleeping after zero-request skips.
+        return None
+
+    @staticmethod
+    def _normalize_excluded(exclude_handles: set[str] | None) -> set[str]:
+        if not exclude_handles:
+            return set()
+        # Repository sets (100k-700k handles) are already normalized lowercase
+        # without '@'; avoid copying them on every work item.
+        if len(exclude_handles) >= 10_000:
+            return exclude_handles
+        return {handle.removeprefix("@").lower() for handle in exclude_handles}
+
+    @classmethod
+    def _extract_bio_links(cls, user_data: Any) -> list[str]:
+        if not isinstance(user_data, dict):
+            return []
+        raw = cls._get(user_data, "bioLink", "bio_link", default=None)
+        if isinstance(raw, dict):
+            link = str(raw.get("link") or "").strip()
+            return [link] if link else []
+        if isinstance(raw, str) and raw.strip():
+            return [raw.strip()]
+        return []
 
     async def _recover_if_blocked(self, consecutive_blocked: int, *, context: str) -> bool:
         if consecutive_blocked < self.max_consecutive_blocked_profiles:

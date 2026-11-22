@@ -23,10 +23,14 @@ NICHE_HASHTAGS: dict[str, tuple[str, ...]] = {
     "fitness": (
         "fitnessjourney",
         "fitnessinfluencer",
-        "weightlossjourney",
         "gymtok",
+        "gymrat",
+        "bodybuilding",
+        "strengthtraining",
         "backworkout",
         "backday",
+        "chestday",
+        "legday",
         "legworkout",
         "gluteworkout",
         "glutegrowth",
@@ -41,11 +45,11 @@ NICHE_HASHTAGS: dict[str, tuple[str, ...]] = {
         "hypertrophy",
         "weightlifting",
         "powerlifting",
-        "hybridathlete",
-        "mobility",
+        "squats",
+        "deadlift",
+        "benchpress",
         "fatloss",
         "fatlosstips",
-        "weightlosstips",
         "gymtransformation",
     ),
     "mom": (
@@ -335,20 +339,31 @@ REJECTED_HASHTAGS: dict[str, frozenset[str]] = {
     "fitness": frozenset(
         {
             "aestheticeats",
+            "caloriedeficithack",
             "cottagecheese",
+            "cottagecheeserecipes",
             "dietitian",
+            "fibermaxxing",
             "fit",
             "food",
             "glowup",
+            "guthealth",
             "guttok",
             "healthy",
+            "hiddenmacros",
             "highprotein",
+            "macrofriendly",
+            "macrofriendlyswaps",
             "makeup",
             "outfitinspo",
+            "proffee",
             "proteincoffee",
+            "proteinintake",
+            "proteinmaxxing",
             "tinnedfish",
             "transformation",
             "travel",
+            "volumeeating",
             "whatieatinaday",
         }
     ),
@@ -359,84 +374,70 @@ REJECTED_HASHTAGS: dict[str, frozenset[str]] = {
 # show the creator's bio email and follower count in the snippet, so hits are
 # pre-filtered before any TikTok request. Gmail phrases yielded ~2.5 new usable
 # creators per query; "collab"/"brand deals" without a domain yielded ~0.1.
+# Non-gym phrases (running, marathon, hyrox, crossfit, meal prep, recipes,
+# dietitian, yoga, triathlon, boxing, fit mom, postpartum) were removed so the
+# 14-day cursor reset only refreshes gym/strength/personal-training queries.
 YAHOO_QUERIES: dict[str, tuple[str, ...]] = {
     "fitness": (
         '"gmail.com" "personal trainer"',
         '"gmail.com" "fitness coach"',
         '"gmail.com" "online coach" gym',
-        '"gmail.com" "nutrition coach"',
+        '"gmail.com" "online fitness coach"',
         '"gmail.com" "NASM"',
         '"gmail.com" "ISSA" trainer',
         '"gmail.com" bodybuilding',
+        '"gmail.com" "bodybuilding coach"',
         '"gmail.com" "powerlifting"',
         '"gmail.com" "pilates"',
         '"gmail.com" "calisthenics"',
         '"gmail.com" "weight loss" coach',
-        '"gmail.com" "macros"',
-        '"gmail.com" "high protein"',
-        '"gmail.com" "hybrid athlete"',
         '"collabs" "gmail.com" fitness',
         '"gmail.com" "glute"',
-        '"gmail.com" "run club" running',
+        '"gmail.com" "glute growth"',
         '"gmail.com" "strength coach"',
-        '"gmail.com" "fat loss"',
+        '"gmail.com" "fat loss" gym',
         '"gmail.com" "glute workout"',
         '"outlook.com" "personal trainer"',
         '"gmail.com" "pilates instructor"',
-        '"outlook.com" "running coach"',
-        '"outlook.com" "meal prep"',
-        '"gmail.com" "hyrox"',
-        '"gmail.com" "crossfit"',
         '"gmail.com" "weight loss coach"',
         '"gmail.com" "home workout"',
-        '"gmail.com" "protein recipes"',
         '"gmail.com" "fitness journey"',
         '"gmail.com" "bodybuilder"',
         '"gmail.com" "gymtok"',
         '"gmail.com" "strength training"',
-        '"gmail.com" "yoga instructor"',
-        '"gmail.com" "marathon"',
-        '"gmail.com" "high protein meals"',
         '"gmail.com" "gym girl"',
         '"gmail.com" "fitness influencer"',
         '"gmail.com" "workout routine"',
         '"gmail.com" "online personal trainer"',
         '"gmail.com" "certified personal trainer"',
         '"gmail.com" "leg day"',
+        '"gmail.com" "chest day"',
+        '"gmail.com" "back day"',
+        '"gmail.com" "push pull legs"',
+        '"gmail.com" "hypertrophy"',
         '"gmail.com" "fitness model"',
         '"gmail.com" "physique"',
         '"gmail.com" "bikini competitor"',
-        '"gmail.com" "transformation"',
-        '"gmail.com" "postpartum fitness"',
-        '"gmail.com" "fit mom"',
-        '"gmail.com" "calorie deficit"',
-        '"gmail.com" "dietitian"',
-        '"gmail.com" "triathlon"',
+        '"gmail.com" "calorie deficit" gym',
         '"gmail.com" "kettlebell"',
-        '"gmail.com" "lifting"',
+        '"gmail.com" "lifting" gym',
         '"gmail.com" "booty workout"',
-        '"gmail.com" "barre"',
-        '"gmail.com" "boxing coach"',
-        '"gmail.com" "mobility"',
         '"outlook.com" "fitness coach"',
         '"outlook.com" "gym"',
         '"outlook.com" "workout"',
-        '"outlook.com" "nutrition coach"',
         '"outlook.com" "glute"',
         '"outlook.com" "weight loss"',
         '"outlook.com" "bodybuilding"',
-        # Added 2026-11-11: 67 phrases screened on Yahoo pages 0-1, these 40 each
-        # returned a creator with an email and 10k+ followers not yet evaluated.
         '"icloud.com" "gym"',
         '"icloud.com" "fitness"',
-        '"icloud.com" "coach"',
+        '"icloud.com" "personal trainer"',
         '"icloud.com" "workout"',
-        '"icloud.com" "lifting"',
+        '"icloud.com" "lifting" gym',
         '"yahoo.com" "gym"',
         '"yahoo.com" "fitness"',
-        '"yahoo.com" "coach"',
+        '"yahoo.com" "personal trainer"',
         '"yahoo.com" "workout"',
-        '"yahoo.com" "lifting"',
+        '"yahoo.com" "lifting" gym',
         '"hotmail.com" "gym"',
         '"hotmail.com" "fitness"',
         '"hotmail.com" "workout"',
@@ -445,26 +446,28 @@ YAHOO_QUERIES: dict[str, tuple[str, ...]] = {
         '"gmail.com" "gym" "collab"',
         '"gmail.com" "fitness" "inquiries"',
         '"gmail.com" "fitness" "collab"',
-        '"gmail.com" "coach" "business inquiries"',
-        '"gmail.com" "coach" "inquiries"',
-        '"gmail.com" "coach" "collab"',
+        '"gmail.com" "fitness coach" "inquiries"',
         '"gmail.com" "workout" "business inquiries"',
         '"gmail.com" "workout" "inquiries"',
         '"gmail.com" "gym rat"',
         '"gmail.com" "gym bro"',
         '"gmail.com" "bulking"',
-        '"gmail.com" "online coaching"',
+        '"gmail.com" "online coaching" gym',
         '"gmail.com" "IFBB"',
         '"gmail.com" "weightlifting"',
-        '"gmail.com" "squat"',
+        '"gmail.com" "squat" gym',
         '"gmail.com" "bench press"',
+        '"gmail.com" "deadlift"',
         '"gmail.com" "fitness tips"',
         '"gmail.com" "gym motivation"',
         '"gmail.com" "powerlifter"',
         '"gmail.com" "gymshark"',
+        '"gmail.com" "dfyne"',
+        '"gmail.com" "aybl"',
+        '"gmail.com" "youngla"',
         '"gmail.com" "fitness creator"',
         '"gmail.com" "home gym"',
-        '"gmail.com" "CPT"',
+        '"gmail.com" "CPT" gym',
         '"gmail.com" "gym content"',
         '"gmail.com" "gym wear"',
     ),
@@ -472,37 +475,34 @@ YAHOO_QUERIES: dict[str, tuple[str, ...]] = {
 
 # A harvested hashtag must contain one of its niche's stems: off-niche tags
 # (#makeup, #skincare, #food, #creatorsearchinsights) were the most-mentioned
-# harvested fitness tags and pulled in creators reviewers reject. "coach" is not
-# a stem: it crawled Coach handbag tags (#coachoutlet) and #coachella. Bare "fit",
-# "train", "lift", "abs", "yoga" and "marathon" are not stems either: on 2026-11-11
-# their tags (#fitjeans, #dogtraining, #lashliftandtint, #hauslabs) took 30% of
-# crawl time for 14% of leads.
+# harvested fitness tags and pulled in creators reviewers reject. "coach" and
+# bare "trainer" are not stems: they crawled #coachoutlet, #coachella,
+# #horsetrainersoftiktok, and #dogtrainer. Bare "fit", "train", "lift", "abs",
+# "yoga", "calorie", and "marathon" are excluded too.
 HARVEST_STEMS: dict[str, tuple[str, ...]] = {
     "fitness": (
         "gym", "fitness", "fittok", "fitfam", "workout", "lifting", "weightlift", "deadlift",
-        "trainer", "muscle", "glute", "legday", "bicep", "pilates", "calisthenic", "bodybuild",
-        "powerlift", "strength", "cardio", "hiit",
-        "weightloss", "fatloss", "macro", "calorie", "nutrition",
-        # 2026-11-20: lift and split names. 1,589 harvested tags with these words had never
-        # been crawled for lack of a stem, though qualifying creators use them hundreds of
-        # times (#squat 409, #benchpress 355, #chestday 320, #physique 496, #strongwomen 558).
+        "muscle", "glute", "legday", "bicep", "pilates", "calisthenic", "bodybuild",
+        "powerlift", "strength", "hiit",
+        "weightloss", "fatloss", "macro", "caloriedeficit", "nutrition",
+        # Lift, split, and explicit gym-coaching stems.
         "squat", "benchpress", "chestday", "armday", "shoulderday", "backday", "pushday",
         "pullday", "pushpull", "physique", "bulking", "leanbulk", "kettlebell", "dumbbell",
         "barbell", "tricep", "hamstring", "smithmachine", "cablemachine", "strongwom",
         "stronggirl", "strongnotskinny", "gains", "wholift", "weightedvest", "onlinecoach",
-        "personaltrain",
+        "personaltrain", "fitnesscoach", "gymcoach", "strengthcoach",
     ),
 }
 
-# Reviewed 2026-11-19 against leads-hub verdicts since 11-12: "protein", "mealprep",
-# "running", "runner", "crossfit" and "hyrox" tags took 1,000 of 4,300 crawl minutes for
-# about 2 kept leads an hour, against 5 or more for "gym" and "workout" tags. Tags with a
-# food, sport or family word feed creators `rejected_group` skips anyway.
+# Tags with a food, sport, family, animal-training, or beauty/gymnastics word
+# feed creators `rejected_group` skips anyway.
 HARVEST_EXCLUDED: dict[str, re.Pattern[str]] = {
     "fitness": re.compile(
         r"recipe|meal|food|cook|bake|snack|breakfast|dinner|lunch|vegan|keto|whatieat|protein"
         r"|running|runner|marathon|hyrox|crossfit|boxing|football|soccer|triathl"
-        r"|mom(?!ent)|(?<!maxi)mum|baby|pregnan|postpartum"
+        r"|gymnast|yoga|softball|baseball|tennis|volleyball|golf|hockey|pickleball"
+        r"|mom(?!ent)|(?<!maxi)mum|baby|pregnan|postpartum|dad(?!dy)|papa"
+        r"|horse|equestrian|dog|canine|puppy|lash|salon|pilatesprincess"
         r"|bargain|drsquatch"
     ),
 }
@@ -530,19 +530,46 @@ def is_harvestable_hashtag(tag: str, niche: str | None = None) -> bool:
 
 # Words a gym or strength-training creator uses in their own bio and captions.
 # A creator who posted one video under a fitness hashtag is usually not one:
-# reviewers rejected 85% of the leads pushed 2026-11-05..10. Running and yoga
-# words are left out because reviewers kept 6 of 31 such creators. "protein"
-# and "training" are left out too: recipe pages and a dog-training page passed
-# on them (2026-11-11). So is bare "coach": Coach handbag pages passed on it.
+# reviewers rejected 85% of the leads pushed 2026-11-05..10. Running, yoga,
+# crossfit, hyrox, bare "protein", "training", "trainer", "coach", "coaching",
+# "athlete", and "calories" are left out because recipe, horse/dog training,
+# dating/mindset coaching, lash-lift, gymnastics, and non-gym sport pages passed
+# on them. Gymwear brand tags (gymshark/dfyne/aybl/youngla/etc.) capture gym
+# creators whose bios only list ambassador codes.
 CONTENT_TERMS: dict[str, re.Pattern[str]] = {
     "fitness": re.compile(
         r"(?i)(?<![a-z])(?:"
-        r"gym\w*|fitness\w*|fittok|fitfam|workouts?|work ?out|lift(?:ing|er|s)?|powerlift\w*"
-        r"|weightlift\w*|bodybuild\w*|physique|personal train\w*|trainer|coaching"
-        r"|pilates|calisthenics\w*|strength\w*|muscles?\w*|glute(?!n)\w*|abs|leg ?day|squats?"
-        r"|deadlift\w*|bench(?:press)?|hypertrophy|bulk(?:ing)?|shred\w*|gains|macros?"
-        r"|calories?|calorie ?deficit|fat ?loss|weight ?loss\w*|athlete|ifbb|cardio|hiit|hyrox"
-        r"|crossfit|mobility|nutrition\w*"
+        r"gym(?!(?:nast|nastic))[a-z]*|fitness\w*|fittok|fitfam|workouts?|work ?out"
+        r"|(?<!lash )(?<!face )(?<!brow )(?<!fork)lift(?:ing|er|s)?"
+        r"|powerlift\w*|weightlift\w*|body ?build\w*|physique"
+        r"|personal train\w*|online (?:fitness )?coach\w*"
+        r"|(?:fitness|strength|gym|physique|body ?recomp|prep) coach\w*|certified pt|cpt"
+        r"|pilates|calisthenics\w*|strength\w*|muscles?\w*|glute(?!n)\w*|abs"
+        r"|leg ?day|chest ?day|back ?day|arm ?day|shoulder ?day|push ?day|pull ?day"
+        r"|squats?|deadlift\w*|bench(?:press)?|hypertrophy|bulk(?:ing)?|shred\w*|gains|macros?"
+        r"|calorie ?deficit|fat ?loss|weight ?loss\w*|ifbb|cardio|hiit|mobility|nutrition\w*"
+        r"|barbell|dumbbell|kettlebell|smith ?machine|triceps?|biceps?|hamstrings?"
+        r"|dfyne|aybl|youngla|alphalete|oner ?active|teveo|nvgtn|ekkovision"
+        r")(?![a-z])"
+    ),
+}
+
+# Stricter bio signal for promoting a followed creator to a level-2 following
+# seed: requires an explicit gym/lifting/fitness-coaching signal (not bare
+# nutrition, macros, mobility, cardio, or weight loss), preventing off-niche
+# snowball drift.
+SEED_BIO_TERMS: dict[str, re.Pattern[str]] = {
+    "fitness": re.compile(
+        r"(?i)(?<![a-z])(?:"
+        r"gym(?!(?:nast|nastic))[a-z]*|fitness\w*|fittok|fitfam|workouts?|work ?out"
+        r"|(?<!lash )(?<!face )(?<!brow )(?<!fork)lift(?:ing|er|s)?"
+        r"|powerlift\w*|weightlift\w*|body ?build\w*|physique"
+        r"|personal train\w*|online (?:fitness )?coach\w*"
+        r"|(?:fitness|strength|gym|physique|body ?recomp|prep) coach\w*|certified pt|cpt"
+        r"|strength\w*|muscles?\w*|glute(?!n)\w*|leg ?day|chest ?day|back ?day"
+        r"|squats?|deadlift\w*|bench(?:press)?|hypertrophy|ifbb"
+        r"|barbell|dumbbell|kettlebell|calisthenics\w*"
+        r"|dfyne|aybl|youngla|alphalete|oner ?active|teveo|nvgtn|ekkovision"
         r")(?![a-z])"
     ),
 }
@@ -560,34 +587,50 @@ def is_on_niche(niche: str, bio: str, captions: Sequence[str]) -> bool:
     return hits >= 3 or (hits >= 1 and bool(terms.search(bio)))
 
 
-# Groups reviewers kept under 16% of, against 28% overall (324 reviewed leads, 2026-11-17..18).
-_SPORT = r"run|running|runners?|marathon\w*|hyrox|boxing|mma|football|soccer|basketball|cycling|triathl\w*"
+# Groups reviewers kept under 16% of, against 28% overall (324 reviewed leads,
+# 2026-11-17..18), plus non-gym professions/promos found in the Nov 21 audit.
+_SPORT = (
+    r"run|running|runners?|marathon\w*|hyrox|crossfit|boxing|mma|football|soccer|basketball"
+    r"|cycling|triathl\w*|softball|baseball|tennis|volleyball|golf|hockey|pickleball"
+    r"|gymnast(?:ics?|s)?|yoga|yogi|wrestling|bjj|jiu[- ]?jitsu|cheer(?:leading)?"
+)
 _FOOD = (
     r"recipes?|meal ?prep|protein (?:balls?|bars?|shakes?|pancakes?)|cook\w*|bak(?:e|ed|ing)"
     r"|ingredients?|delicious|tasty|breakfast|dinner|snacks?"
 )
 _FAMILY = (
-    r"mom(?:s|my|mies|life)?|mum(?:s|my)?|toddlers?|baby|husband|wife|vlogs?|grwm|day in my life"
-    r"|outfits?|makeup|skincare"
+    r"mom(?:s|my|mies|life)?|mum(?:s|my)?|dad(?:s|dy)?|papa|father(?:hood)?|toddlers?|baby|husband|wife"
+    r"|vlogs?|grwm|day in my life|outfits?|makeup|skincare|lash(?:es| ?lift)?|salon|medspa"
+    r"|natural hair|pop culture|skits?"
+)
+_NON_GYM = (
+    r"dog ?train\w*|canine|k9|pupp(?:y|ies)|horse ?train\w*|equestrian|stable"
+    r"|songs? ?promo|dm for (?:songs? )?promo|spotify|telegram|kik|promotions"
+    r"|relationship coach\w*|dating coach\w*|avoidant|psycholog(?:y|ist)|therapist"
+    r"|biohacking|longevity|reiki"
 )
 REJECTED_GROUPS: dict[str, dict[str, re.Pattern[str]]] = {
     "fitness": {
         "sport": re.compile(rf"(?i)(?<![a-z])(?:{_SPORT})(?![a-z])"),
         "food": re.compile(rf"(?i)(?<![a-z])(?:{_FOOD})(?![a-z])"),
         "family or lifestyle": re.compile(rf"(?i)(?<![a-z])(?:{_FAMILY})(?![a-z])"),
+        "non-gym business or promo": re.compile(rf"(?i)(?<![a-z])(?:{_NON_GYM})(?![a-z])"),
     },
 }
-_COUNTRY_EMAIL = re.compile(r"(?i)\.(?:uk|de|nl|fr|pl|es|it|au|ie|se|dk|no|cz|be|at|ch|br|mx)$")
+_COUNTRY_EMAIL = re.compile(
+    r"(?i)\.(?:uk|de|nl|fr|pl|es|it|au|ie|se|dk|no|cz|be|at|ch|br|mx"
+    r"|nz|za|in|pt|fi|ro|hu|sk|hr|bg|gr|tr|ru|ua|ar|cl|pe|sg|my|ph|id|th|vn|ae|sa|il|ng|ke|pk|jp|kr|cn)$"
+)
 
 
 def rejected_group(niche: str, bio: str, captions: Sequence[str], email: str) -> str | None:
-    """The group reviewers reject this creator with, if any: a sport, food, or
-    family word in the bio, a sport or food word in two recent captions, or an
-    email on a country domain."""
+    """The group reviewers reject this creator with, if any: a sport, food,
+    family, or non-gym word in the bio, a sport/food/non-gym word in two recent
+    captions, or an email on a country domain."""
     groups = REJECTED_GROUPS.get(niche.strip().lower())
     if groups is None:
         return None
-    if _COUNTRY_EMAIL.search(email.strip()):
+    if email and _COUNTRY_EMAIL.search(email.strip()):
         return "email on a country domain"
     texts = [re.sub(r"#\S+", "", caption) for caption in captions]
     for name, terms in groups.items():
@@ -600,6 +643,13 @@ def rejected_group(niche: str, bio: str, captions: Sequence[str], email: str) ->
 def bio_on_niche(niche: str, bio: str) -> bool:
     """Whether the bio uses `niche`'s words. Niches without a word list pass."""
     terms = CONTENT_TERMS.get(niche.strip().lower())
+    return terms is None or bool(terms.search(bio))
+
+
+def seed_bio_on_niche(niche: str, bio: str) -> bool:
+    """Stricter bio check for promoting a followed account to a following seed."""
+    key = niche.strip().lower()
+    terms = SEED_BIO_TERMS.get(key, CONTENT_TERMS.get(key))
     return terms is None or bool(terms.search(bio))
 
 

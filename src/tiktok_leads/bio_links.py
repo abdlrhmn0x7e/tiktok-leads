@@ -5,6 +5,7 @@ import re
 from urllib.parse import unquote, urlsplit
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from tiktok_leads.email_extractor import extract_emails
 
@@ -50,7 +51,61 @@ _ASSET_SUFFIXES = (
 # Shop and host pages print their own support or placeholder addresses
 # (api-services-support@amazon.com, dispute@temu.com, filler@godaddy.com),
 # which are never the creator's.
-_PLATFORM_EMAIL_DOMAINS = ("amazon.com", "temu.com", "godaddy.com", "example.com")
+_PLATFORM_EMAIL_DOMAINS = (
+    "amazon.com",
+    "temu.com",
+    "godaddy.com",
+    "example.com",
+    "sentry.io",
+    "wixpress.com",
+    "squarespace.com",
+    "shopify.com",
+    "linktr.ee",
+    "beacons.ai",
+    "stan.store",
+    "wordpress.org",
+    "cloudflare.com",
+    "google.com",
+    "tiktok.com",
+    "instagram.com",
+    "facebook.com",
+    "twitter.com",
+    "x.com",
+    "youtube.com",
+    "apple.com",
+    "microsoft.com",
+    "stripe.com",
+    "paypal.com",
+    "klaviyo.com",
+    "mailchimp.com",
+    "hubspot.com",
+    "canva.com",
+    "notion.so",
+)
+
+_NOISE_LOCAL_PARTS = frozenset(
+    {
+        "noreply",
+        "no-reply",
+        "donotreply",
+        "do-not-reply",
+        "privacy",
+        "legal",
+        "abuse",
+        "dmca",
+        "copyright",
+        "security",
+        "postmaster",
+        "webmaster",
+        "hostmaster",
+        "mailer-daemon",
+        "support",
+        "helpdesk",
+        "billing",
+        "careers",
+        "unsubscribe",
+    }
+)
 
 # Embedded font licences put their authors' emails in <style> blocks. Scripts
 # stay: site builders keep the real contact email in hydration JSON there.
@@ -66,6 +121,12 @@ _FETCH_HEADERS = {
 }
 
 _MAX_RESPONSE_BYTES = 600_000
+
+_SESSION = requests.Session()
+_SESSION.headers.update(_FETCH_HEADERS)
+_ADAPTER = HTTPAdapter(pool_connections=8, pool_maxsize=8)
+_SESSION.mount("https://", _ADAPTER)
+_SESSION.mount("http://", _ADAPTER)
 
 
 def bio_hints_link_page(bio: str) -> bool:
@@ -131,19 +192,18 @@ def emails_from_bio_links(
 
 
 def _emails_from_url(url: str, *, timeout_seconds: float) -> list[str]:
-    response = requests.get(
+    with _SESSION.get(
         url,
-        headers=_FETCH_HEADERS,
         timeout=timeout_seconds,
         stream=True,
         allow_redirects=True,
-    )
-    response.raise_for_status()
-    content_type = response.headers.get("Content-Type", "")
-    if content_type and "text" not in content_type and "json" not in content_type:
-        return []
-    body = response.raw.read(_MAX_RESPONSE_BYTES, decode_content=True)
-    html = body.decode(response.encoding or "utf-8", errors="replace")
+    ) as response:
+        response.raise_for_status()
+        content_type = response.headers.get("Content-Type", "")
+        if content_type and "text" not in content_type and "json" not in content_type:
+            return []
+        body = response.raw.read(_MAX_RESPONSE_BYTES, decode_content=True)
+        html = body.decode(response.encoding or "utf-8", errors="replace")
 
     # mailto: links are the highest-confidence signal and survive URL-encoding.
     chunks = [unquote(m) for m in _MAILTO_RE.findall(html)]
@@ -152,9 +212,9 @@ def _emails_from_url(url: str, *, timeout_seconds: float) -> list[str]:
 
 
 def _is_noise(email: str) -> bool:
-    domain = email.rsplit("@", 1)[-1]
+    local, _, domain = email.partition("@")
     on_platform = any(domain == d or domain.endswith(f".{d}") for d in _PLATFORM_EMAIL_DOMAINS)
-    return email.endswith(_ASSET_SUFFIXES) or on_platform
+    return email.endswith(_ASSET_SUFFIXES) or on_platform or local in _NOISE_LOCAL_PARTS
 
 
 def _is_link_service(url: str) -> bool:

@@ -28,9 +28,11 @@ async def scrape_handles(
     niche: str,
     min_followers: int,
     min_average_views: int,
+    max_followers: int | None = None,
     found_via: str = "handle",
     source_label: str | None = None,
     known_emails: Mapping[str, str] | None = None,
+    exclude_handles: set[str] | None = None,
 ) -> int:
     """`known_emails` maps handle -> an email found off-profile (e.g. in a
     search snippet), used when the bio has none."""
@@ -52,7 +54,9 @@ async def scrape_handles(
         notifier,
         min_followers=min_followers,
         min_average_views=min_average_views,
+        max_followers=max_followers,
         found_via=found_via,
+        exclude_handles=exclude_handles,
     )
 
 
@@ -66,6 +70,7 @@ async def scrape_hashtag(
     limit: int,
     min_followers: int,
     min_average_views: int,
+    max_followers: int | None = None,
     exclude_handles: set[str] | None = None,
     feed_cursor_max_age_days: int = 14,
 ) -> int:
@@ -94,7 +99,9 @@ async def scrape_hashtag(
         notifier,
         min_followers=min_followers,
         min_average_views=min_average_views,
+        max_followers=max_followers,
         found_via=f"#{tag}",
+        exclude_handles=exclude_handles,
     )
 
 
@@ -108,6 +115,7 @@ async def scrape_search(
     limit: int,
     min_followers: int,
     min_average_views: int,
+    max_followers: int | None = None,
     exclude_handles: set[str] | None = None,
 ) -> int:
     logger.info("searching users for '%s' (niche=%s limit=%s)", query, niche, limit)
@@ -126,7 +134,9 @@ async def scrape_search(
         notifier,
         min_followers=min_followers,
         min_average_views=min_average_views,
+        max_followers=max_followers,
         found_via=f"search:{query}",
+        exclude_handles=exclude_handles,
     )
 
 
@@ -139,6 +149,7 @@ async def scrape_following(
     max_pages: int,
     min_followers: int,
     min_average_views: int,
+    max_followers: int | None = None,
     exclude_handles: set[str] | None = None,
 ) -> int:
     current = repository.following_seed(seed)
@@ -146,7 +157,20 @@ async def scrape_following(
     if current is None or current.state != "due":
         return 0
     found_via = f"following:@{seed}"
-    logger.info("crawling who @%s follows for niche=%s cursor=%s", seed, current.niche, current.cursor)
+    logger.info(
+        "crawling who @%s follows for niche=%s level=%s cursor=%s",
+        seed,
+        current.niche,
+        current.level,
+        current.cursor,
+    )
+    # Cap following-graph expansion at depth 2: only level-1 (leads-hub) seeds
+    # promote new level-2 seeds, preventing unbounded off-niche drift.
+    on_seed = (
+        (lambda handle, sec_uid: repository.add_found_seed(handle, current.niche, sec_uid, commit=False))
+        if current.level == 1
+        else None
+    )
     return await _process_candidates(
         source.profiles_from_following(
             seed,
@@ -159,13 +183,15 @@ async def scrape_following(
             ),
             # No on_known: popular creators are followed by many seeds, and each would add a source to the lead.
             exclude_handles=exclude_handles,
-            on_seed=lambda handle, sec_uid: repository.add_found_seed(handle, current.niche, sec_uid),
+            on_seed=on_seed,
         ),
         repository,
         notifier,
         min_followers=min_followers,
         min_average_views=min_average_views,
+        max_followers=max_followers,
         found_via=found_via,
+        exclude_handles=exclude_handles,
     )
 
 
@@ -209,6 +235,9 @@ def _add_lead_source(
     logger.info("added source %s to @%s (niche=%s)", found_via, lead.handle, lead.niche)
 
 
+_COMMIT_BATCH_SIZE = 50
+
+
 async def _process_candidates(
     candidates: AsyncIterable[CandidateProfile],
     repository: LeadRepository,
@@ -216,57 +245,89 @@ async def _process_candidates(
     *,
     min_followers: int,
     min_average_views: int,
+    max_followers: int | None = None,
     found_via: str | None = None,
+    exclude_handles: set[str] | None = None,
 ) -> int:
     inserted = 0
-    async for candidate in candidates:
-        average_views = candidate.average_views
-        display_average_views = (
-            floor_view_count(average_views) if average_views is not None else "unknown"
-        )
-        logger.info(
-            "checking @%s followers=%s average_views=%s source=%s",
-            candidate.handle or "unknown",
-            candidate.followers_count if candidate.followers_count is not None else "unknown",
-            display_average_views,
-            candidate.source,
-        )
+    pending_writes = 0
+    try:
+        async for candidate in candidates:
+            average_views = candidate.average_views
+            display_average_views = (
+                floor_view_count(average_views) if average_views is not None else "unknown"
+            )
+            logger.info(
+                "checking @%s followers=%s average_views=%s source=%s",
+                candidate.handle or "unknown",
+                candidate.followers_count if candidate.followers_count is not None else "unknown",
+                display_average_views,
+                candidate.source,
+            )
 
-        evaluation = evaluate_candidate(
-            candidate,
-            min_followers=min_followers,
-            min_average_views=min_average_views,
-        )
-        repository.record_scraped_profile(
-            handle=candidate.handle,
-            niche=candidate.niche,
-            source=candidate.source,
-            skip_reason=evaluation.skip_code,
-            found_via=found_via,
-        )
-        # Hashtags from creators below the follower bar are noise-heavy; only
-        # harvest from accounts that at least qualified on followers.
-        if candidate.discovered_hashtags and evaluation.skip_code != "low_followers":
-            repository.record_discovered_hashtags(candidate.discovered_hashtags, niche=candidate.niche)
+            evaluation = evaluate_candidate(
+                candidate,
+                min_followers=min_followers,
+                min_average_views=min_average_views,
+                max_followers=max_followers,
+            )
+            duplicate_email = (
+                evaluation.lead is not None and repository.exists_by_email(evaluation.lead.email)
+            )
+            skip_code = "duplicate_email" if duplicate_email else evaluation.skip_code
+            repository.record_scraped_profile(
+                handle=candidate.handle,
+                niche=candidate.niche,
+                source=candidate.source,
+                skip_reason=skip_code,
+                found_via=found_via,
+                commit=False,
+            )
+            if exclude_handles is not None and candidate.handle:
+                exclude_handles.add(candidate.handle.removeprefix("@").lower())
+            # Only harvest hashtags from on-niche creators at or above the
+            # follower bar so off-niche / rejected-group accounts never pollute
+            # the discovery flywheel.
+            if candidate.discovered_hashtags and skip_code not in (
+                "low_followers",
+                "high_followers",
+                "off_niche",
+            ):
+                repository.record_discovered_hashtags(
+                    candidate.discovered_hashtags,
+                    niche=candidate.niche,
+                    commit=False,
+                )
+            pending_writes += 1
 
-        if evaluation.lead is None:
-            logger.info("skipped @%s: %s", candidate.handle or "unknown", evaluation.skip_reason)
-            continue
+            if evaluation.lead is None:
+                logger.info("skipped @%s: %s", candidate.handle or "unknown", evaluation.skip_reason)
+                if pending_writes >= _COMMIT_BATCH_SIZE:
+                    repository.commit()
+                    pending_writes = 0
+                continue
 
-        lead = replace(evaluation.lead, found_via=found_via)
-        if repository.exists_by_email(lead.email):
-            logger.info("skipped @%s: email already exists (%s)", lead.handle, lead.email)
-            continue
+            lead = replace(evaluation.lead, found_via=found_via)
+            if duplicate_email:
+                logger.info("skipped @%s: email already exists (%s)", lead.handle, lead.email)
+                if pending_writes >= _COMMIT_BATCH_SIZE:
+                    repository.commit()
+                    pending_writes = 0
+                continue
 
-        if repository.insert_lead(lead):
-            logger.info("inserted @%s email=%s", lead.handle, lead.email)
-            logger.info("sending notification for @%s", lead.handle)
-            try:
-                notifier.send(lead)
-            except Exception:
-                logger.exception("failed to send notification for @%s", lead.handle)
-            else:
-                repository.mark_notified(lead.email, lead.platform)
-                logger.info("notification marked sent for @%s", lead.handle)
-            inserted += 1
+            if repository.insert_lead(lead):
+                pending_writes = 0
+                logger.info("inserted @%s email=%s", lead.handle, lead.email)
+                logger.info("sending notification for @%s", lead.handle)
+                try:
+                    notifier.send(lead)
+                except Exception:
+                    logger.exception("failed to send notification for @%s", lead.handle)
+                else:
+                    repository.mark_notified(lead.email, lead.platform)
+                    logger.info("notification marked sent for @%s", lead.handle)
+                inserted += 1
+    finally:
+        if pending_writes:
+            repository.commit()
     return inserted

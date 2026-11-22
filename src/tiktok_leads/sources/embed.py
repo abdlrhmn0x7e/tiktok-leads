@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 
 import requests
+from requests.adapters import HTTPAdapter
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -21,6 +22,13 @@ USER_AGENT = (
 )
 _STATE = re.compile(r'<script id="__FRONTITY_CONNECT_STATE__"[^>]*>(.*?)</script>', re.DOTALL)
 _SEC_UID = re.compile(r'"secUid":"([^"]+)"')
+
+# Keep-alive session avoids a fresh TCP+TLS handshake on every embed check.
+_SESSION = requests.Session()
+_SESSION.headers.update({"User-Agent": USER_AGENT})
+_ADAPTER = HTTPAdapter(pool_connections=8, pool_maxsize=8)
+_SESSION.mount("https://", _ADAPTER)
+_SESSION.mount("http://", _ADAPTER)
 
 
 @dataclass(frozen=True)
@@ -61,9 +69,8 @@ def parse_embed(page: str) -> EmbedProfile | None:
 def fetch_embed(handle: str, *, timeout_seconds: float = 20.0, attempts: int = 4) -> EmbedProfile | None:
     status = 0
     for attempt in range(attempts):
-        response = requests.get(
+        response = _SESSION.get(
             f"https://www.tiktok.com/embed/@{handle}",
-            headers={"User-Agent": USER_AGENT},
             timeout=timeout_seconds,
         )
         status = response.status_code
@@ -91,9 +98,8 @@ def fetch_sec_uid(handle: str, *, timeout_seconds: float = 20.0) -> str | None:
     embed = fetch_embed(handle, timeout_seconds=timeout_seconds)
     if embed is None or not embed.video_ids:
         return None
-    response = requests.get(
+    response = _SESSION.get(
         f"https://www.tiktok.com/@{embed.handle}/video/{embed.video_ids[0]}",
-        headers={"User-Agent": USER_AGENT},
         timeout=timeout_seconds,
     )
     response.raise_for_status()

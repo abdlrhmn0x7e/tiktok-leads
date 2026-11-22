@@ -266,6 +266,7 @@ async def run_daemon(
     )
 
     queue: list[WorkItem] = []
+    exclude_handles: set[str] | None = None
     block_backoff = settings.daemon_block_backoff_initial_seconds
     # The browser session is reused across cycles: a fresh source means every
     # session cold-loads tiktok.com's multi-megabyte bundle through the proxy,
@@ -292,7 +293,14 @@ async def run_daemon(
                     )
                     await asyncio.sleep(settings.effective_rest_seconds)
                     continue
-                logger.info("daemon: new sweep queued with %s work item(s)", len(queue))
+                # Load the excluded-handle cache once per sweep and update it
+                # in-place instead of scanning 1M rows on every work item.
+                exclude_handles = repository.excluded_handles(settings.recheck_after_days)
+                logger.info(
+                    "daemon: new sweep queued with %s work item(s) (%s excluded handles cached)",
+                    len(queue),
+                    len(exclude_handles),
+                )
 
             _retry_unnotified(repository, notifier)
             if settings.notification_daily_digest:
@@ -314,12 +322,21 @@ async def run_daemon(
                     await source.__aenter__()
                     source_opened_at = time.monotonic()
                 requests_before = source.request_count
-                inserted = await _run_batch(source, settings, repository, notifier, batch, limit)
+                inserted = await _run_batch(
+                    source,
+                    settings,
+                    repository,
+                    notifier,
+                    batch,
+                    limit,
+                    exclude_handles=exclude_handles,
+                )
                 requests = source.request_count - requests_before
             except TikTokBlockedError as error:
                 await close_source()
                 queue.extend(batch)
                 random.shuffle(queue)
+                queue.sort(key=lambda item: item.kind in ("yahoo", "following"))
                 sleep_for = block_backoff + random.uniform(
                     0, settings.daemon_block_backoff_jitter_seconds
                 )
@@ -424,6 +441,8 @@ async def _run_batch(
     notifier: Notifier,
     batch: list[WorkItem],
     limit: int,
+    *,
+    exclude_handles: set[str] | None = None,
 ) -> int:
     """Run each work item in this batch on the shared source session."""
     inserted = 0
@@ -439,12 +458,16 @@ async def _run_batch(
                 niche=item.niche,
                 min_followers=settings.min_followers,
                 min_average_views=settings.min_average_views,
+                max_followers=settings.max_followers,
                 found_via="recheck",
             )
             repository.mark_rechecked(item.value)
+            if exclude_handles is not None:
+                exclude_handles.add(item.value.removeprefix("@").lower())
             continue
 
-        exclude_handles = repository.excluded_handles(settings.recheck_after_days)
+        if exclude_handles is None:
+            exclude_handles = repository.excluded_handles(settings.recheck_after_days)
         if item.kind == "yahoo":
             while not yahoo_query_done(repository, item.value, max_age_days=settings.feed_cursor_max_age_days):
                 emails = await next_page_emails(
@@ -465,8 +488,10 @@ async def _run_batch(
                     niche=item.niche,
                     min_followers=settings.min_followers,
                     min_average_views=settings.min_average_views,
+                    max_followers=settings.max_followers,
                     found_via=f"yahoo:{item.value}",
                     known_emails=emails,
+                    exclude_handles=exclude_handles,
                 )
                 await asyncio.sleep(1)
         elif item.kind == "following":
@@ -478,6 +503,7 @@ async def _run_batch(
                 max_pages=settings.discovery_following_pages_per_visit,
                 min_followers=settings.min_followers,
                 min_average_views=settings.min_average_views,
+                max_followers=settings.max_followers,
                 exclude_handles=exclude_handles,
             )
         elif item.kind == "search":
@@ -490,6 +516,7 @@ async def _run_batch(
                 limit=settings.discovery_search_results_per_term,
                 min_followers=settings.min_followers,
                 min_average_views=settings.min_average_views,
+                max_followers=settings.max_followers,
                 exclude_handles=exclude_handles,
             )
         else:  # hashtag (seed or harvested)
@@ -502,6 +529,7 @@ async def _run_batch(
                 limit=limit,
                 min_followers=settings.min_followers,
                 min_average_views=settings.min_average_views,
+                max_followers=settings.max_followers,
                 exclude_handles=exclude_handles,
                 feed_cursor_max_age_days=settings.feed_cursor_max_age_days,
             )

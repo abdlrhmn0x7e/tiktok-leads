@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     database_path: Path = Path("data/leads.sqlite")
     min_followers: int = 10_000
+    max_followers: int | None = None  # optional upper cap (e.g. 250000 to skip mega-accounts/agencies)
     min_average_views: int = 10_000
     notification_channel: str = "none"
     notification_daily_digest: bool = True  # daemon sends a once-a-day summary
@@ -50,6 +51,10 @@ class Settings(BaseSettings):
     recent_video_count: int = 12
     tiktok_request_delay_seconds: float = 2.0
     tiktok_request_jitter_seconds: float = 1.5
+    # Unsigned embed-page fetches don't share the Playwright session; keep a
+    # lighter pause so embed checks don't stall on Playwright's API cadence.
+    tiktok_embed_delay_seconds: float = 0.5
+    tiktok_embed_jitter_seconds: float = 0.3
     tiktok_skip_videos_without_email: bool = True
     tiktok_skip_videos_below_min_followers: bool = True
     tiktok_max_consecutive_blocked_profiles: int = 5
@@ -88,6 +93,10 @@ class Settings(BaseSettings):
     discovery_following_enabled: bool = True  # crawl who leads-hub's seed creators follow
     discovery_following_seeds_per_sweep: int = 30  # due seeds queued per niche per sweep
     discovery_following_pages_per_visit: int = 6  # 30 accounts a page; the rest waits for the next sweep
+    # Stop crawling a seed early if its first N pages yield too few on-niche
+    # accounts (>= min_followers), instead of draining off-niche following lists.
+    discovery_following_early_stop_pages: int = 2
+    discovery_following_min_on_niche_per_stop: int = 2
     # Hashtag feed cursors: resume each crawl where the last one stopped instead
     # of re-reading the (mostly already-evaluated) head of the feed. A cursor
     # older than this restarts from the top to pick up new videos; 0 disables

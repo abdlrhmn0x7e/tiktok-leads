@@ -160,9 +160,10 @@ async def async_main() -> None:
                     niche=args.niche,
                     min_followers=settings.min_followers,
                     min_average_views=settings.min_average_views,
+                    max_followers=settings.max_followers,
                 )
+            exclude_handles = repository.seen_handles() if hashtags else set()
             for hashtag in hashtags:
-                exclude_handles = repository.seen_handles()
                 logging.info(
                     "excluding %s previously evaluated handle(s)",
                     len(exclude_handles),
@@ -176,6 +177,7 @@ async def async_main() -> None:
                     limit=args.limit,
                     min_followers=settings.min_followers,
                     min_average_views=settings.min_average_views,
+                    max_followers=settings.max_followers,
                     exclude_handles=exclude_handles,
                     feed_cursor_max_age_days=settings.feed_cursor_max_age_days,
                 )

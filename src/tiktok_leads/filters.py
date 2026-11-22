@@ -23,11 +23,13 @@ def candidate_to_lead(
     *,
     min_followers: int,
     min_average_views: int,
+    max_followers: int | None = None,
 ) -> Lead | None:
     return evaluate_candidate(
         candidate,
         min_followers=min_followers,
         min_average_views=min_average_views,
+        max_followers=max_followers,
     ).lead
 
 
@@ -36,6 +38,7 @@ def evaluate_candidate(
     *,
     min_followers: int,
     min_average_views: int,
+    max_followers: int | None = None,
 ) -> LeadEvaluation:
     if candidate.followers_count is None or candidate.followers_count < min_followers:
         followers = "unknown" if candidate.followers_count is None else f"{candidate.followers_count:,}"
@@ -45,9 +48,26 @@ def evaluate_candidate(
             skip_code="low_followers",
         )
 
+    if max_followers is not None and candidate.followers_count > max_followers:
+        return LeadEvaluation(
+            lead=None,
+            skip_reason=f"followers above threshold ({candidate.followers_count:,} > {max_followers:,})",
+            skip_code="high_followers",
+        )
+
     emails = extract_emails(candidate.bio, *candidate.external_links) or list(candidate.extra_emails)
     if not emails:
         return LeadEvaluation(lead=None, skip_reason="no email found", skip_code="no_email")
+
+    # Bio-only and country-email vetoes hold regardless of recent views/captions,
+    # so check them before views (prefiltered candidates carry no videos).
+    bio_group = rejected_group(candidate.niche, candidate.bio, [], emails[0])
+    if bio_group is not None:
+        return LeadEvaluation(
+            lead=None,
+            skip_reason=f"reviewers reject this group ({bio_group})",
+            skip_code="off_niche",
+        )
 
     average_views = candidate.average_views
     if average_views is None or average_views < min_average_views:
