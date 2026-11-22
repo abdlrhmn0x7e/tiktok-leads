@@ -370,109 +370,6 @@ REJECTED_HASHTAGS: dict[str, frozenset[str]] = {
 }
 
 
-# Yahoo web-search phrases, each run as `site:tiktok.com <phrase>`. Results
-# show the creator's bio email and follower count in the snippet, so hits are
-# pre-filtered before any TikTok request. Gmail phrases yielded ~2.5 new usable
-# creators per query; "collab"/"brand deals" without a domain yielded ~0.1.
-# Non-gym phrases (running, marathon, hyrox, crossfit, meal prep, recipes,
-# dietitian, yoga, triathlon, boxing, fit mom, postpartum) were removed so the
-# 14-day cursor reset only refreshes gym/strength/personal-training queries.
-YAHOO_QUERIES: dict[str, tuple[str, ...]] = {
-    "fitness": (
-        '"gmail.com" "personal trainer"',
-        '"gmail.com" "fitness coach"',
-        '"gmail.com" "online coach" gym',
-        '"gmail.com" "online fitness coach"',
-        '"gmail.com" "NASM"',
-        '"gmail.com" "ISSA" trainer',
-        '"gmail.com" bodybuilding',
-        '"gmail.com" "bodybuilding coach"',
-        '"gmail.com" "powerlifting"',
-        '"gmail.com" "pilates"',
-        '"gmail.com" "calisthenics"',
-        '"gmail.com" "weight loss" coach',
-        '"collabs" "gmail.com" fitness',
-        '"gmail.com" "glute"',
-        '"gmail.com" "glute growth"',
-        '"gmail.com" "strength coach"',
-        '"gmail.com" "fat loss" gym',
-        '"gmail.com" "glute workout"',
-        '"outlook.com" "personal trainer"',
-        '"gmail.com" "pilates instructor"',
-        '"gmail.com" "weight loss coach"',
-        '"gmail.com" "home workout"',
-        '"gmail.com" "fitness journey"',
-        '"gmail.com" "bodybuilder"',
-        '"gmail.com" "gymtok"',
-        '"gmail.com" "strength training"',
-        '"gmail.com" "gym girl"',
-        '"gmail.com" "fitness influencer"',
-        '"gmail.com" "workout routine"',
-        '"gmail.com" "online personal trainer"',
-        '"gmail.com" "certified personal trainer"',
-        '"gmail.com" "leg day"',
-        '"gmail.com" "chest day"',
-        '"gmail.com" "back day"',
-        '"gmail.com" "push pull legs"',
-        '"gmail.com" "hypertrophy"',
-        '"gmail.com" "fitness model"',
-        '"gmail.com" "physique"',
-        '"gmail.com" "bikini competitor"',
-        '"gmail.com" "calorie deficit" gym',
-        '"gmail.com" "kettlebell"',
-        '"gmail.com" "lifting" gym',
-        '"gmail.com" "booty workout"',
-        '"outlook.com" "fitness coach"',
-        '"outlook.com" "gym"',
-        '"outlook.com" "workout"',
-        '"outlook.com" "glute"',
-        '"outlook.com" "weight loss"',
-        '"outlook.com" "bodybuilding"',
-        '"icloud.com" "gym"',
-        '"icloud.com" "fitness"',
-        '"icloud.com" "personal trainer"',
-        '"icloud.com" "workout"',
-        '"icloud.com" "lifting" gym',
-        '"yahoo.com" "gym"',
-        '"yahoo.com" "fitness"',
-        '"yahoo.com" "personal trainer"',
-        '"yahoo.com" "workout"',
-        '"yahoo.com" "lifting" gym',
-        '"hotmail.com" "gym"',
-        '"hotmail.com" "fitness"',
-        '"hotmail.com" "workout"',
-        '"gmail.com" "gym" "business inquiries"',
-        '"gmail.com" "gym" "inquiries"',
-        '"gmail.com" "gym" "collab"',
-        '"gmail.com" "fitness" "inquiries"',
-        '"gmail.com" "fitness" "collab"',
-        '"gmail.com" "fitness coach" "inquiries"',
-        '"gmail.com" "workout" "business inquiries"',
-        '"gmail.com" "workout" "inquiries"',
-        '"gmail.com" "gym rat"',
-        '"gmail.com" "gym bro"',
-        '"gmail.com" "bulking"',
-        '"gmail.com" "online coaching" gym',
-        '"gmail.com" "IFBB"',
-        '"gmail.com" "weightlifting"',
-        '"gmail.com" "squat" gym',
-        '"gmail.com" "bench press"',
-        '"gmail.com" "deadlift"',
-        '"gmail.com" "fitness tips"',
-        '"gmail.com" "gym motivation"',
-        '"gmail.com" "powerlifter"',
-        '"gmail.com" "gymshark"',
-        '"gmail.com" "dfyne"',
-        '"gmail.com" "aybl"',
-        '"gmail.com" "youngla"',
-        '"gmail.com" "fitness creator"',
-        '"gmail.com" "home gym"',
-        '"gmail.com" "CPT" gym',
-        '"gmail.com" "gym content"',
-        '"gmail.com" "gym wear"',
-    ),
-}
-
 # A harvested hashtag must contain one of its niche's stems: off-niche tags
 # (#makeup, #skincare, #food, #creatorsearchinsights) were the most-mentioned
 # harvested fitness tags and pulled in creators reviewers reject. "coach" and
@@ -503,6 +400,10 @@ HARVEST_EXCLUDED: dict[str, re.Pattern[str]] = {
         r"|gymnast|yoga|softball|baseball|tennis|volleyball|golf|hockey|pickleball"
         r"|mom(?!ent)|(?<!maxi)mum|baby|pregnan|postpartum|dad(?!dy)|papa"
         r"|horse|equestrian|dog|canine|puppy|lash|salon|pilatesprincess"
+        r"|pesas|entren|rutina|ejercici|gimnasio|adelgazar|musculacion|musculation|seance"
+        r"|entrainement|abnehmen|krafttraining|ernahrung|allenamento|palestra|treino"
+        r"|academia|emagrecer|antrenman|kuwait|dubai|habesha|espanol|latino|deutsch"
+        r"|francais|italiano|brasil|polska|turkiye"
         r"|bargain|drsquatch"
     ),
 }
@@ -513,17 +414,20 @@ def is_harvestable_hashtag(tag: str, niche: str | None = None) -> bool:
     something, not generic engagement bait, not just digits, not rejected by
     reviewers, and on-niche when `niche` has stems."""
     tag = tag.strip().lower()
-    stems = HARVEST_STEMS.get((niche or "").strip().lower())
+    key = (niche or "").strip().lower()
+    stems = HARVEST_STEMS.get(key)
     # "gluten" contains the "glute" stem but is food, not fitness.
     on_niche = not stems or any(stem in tag.replace("gluten", "") for stem in stems)
-    excluded = HARVEST_EXCLUDED.get((niche or "").strip().lower())
+    excluded = HARVEST_EXCLUDED.get(key)
     if excluded is not None and excluded.search(tag):
+        return False
+    if key == "fitness" and not tag.isascii():
         return False
     return (
         len(tag) >= 3
         and not tag.isdigit()
         and tag not in GENERIC_HASHTAGS
-        and tag not in REJECTED_HASHTAGS.get((niche or "").strip().lower(), ())
+        and tag not in REJECTED_HASHTAGS.get(key, ())
         and on_niche
     )
 
@@ -618,15 +522,107 @@ REJECTED_GROUPS: dict[str, dict[str, re.Pattern[str]]] = {
     },
 }
 _COUNTRY_EMAIL = re.compile(
-    r"(?i)\.(?:uk|de|nl|fr|pl|es|it|au|ie|se|dk|no|cz|be|at|ch|br|mx"
-    r"|nz|za|in|pt|fi|ro|hu|sk|hr|bg|gr|tr|ru|ua|ar|cl|pe|sg|my|ph|id|th|vn|ae|sa|il|ng|ke|pk|jp|kr|cn)$"
+    r"(?i)(?:\.(?:uk|de|nl|fr|pl|es|it|au|ie|se|dk|no|cz|be|at|ch|br|mx"
+    r"|nz|za|in|pt|fi|ro|hu|sk|hr|bg|gr|tr|ru|ua|ar|cl|pe|sg|my|ph|id|th|vn|ae|sa|il|ng|ke|pk|jp|kr|cn)"
+    r"|@(?:gmx\.net|laposte\.net|naver\.com|daum\.net|qq\.com|163\.com|126\.com|interia\.eu))$"
+)
+_BLOCKED_EMAIL_DOMAINS = re.compile(r"(?i)@[^@\s]*grail-talent\b")
+
+# Language gate: only English creators are allowed.
+_STRIP_NOISE = re.compile(r"https?://\S+|\S+@\S+|#\S+|@\S+")
+_NON_LATIN = re.compile(
+    r"[\u0400-\u052F\u0600-\u06FF\u0590-\u05FF\u0900-\u097F\u0E00-\u0E7F"
+    r"\u1100-\u11FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF\u1200-\u137F\u0370-\u03FF]"
+)
+_NON_EN_DIACRITICS = re.compile(
+    r"[ßäöüÄÖÜñÑ¿¡çÇãõÃÕłŁąęśźżćńĄĘŚŹŻĆŃşğıŞĞİăîșțĂÎȘȚěščřžůĚŠČŘŽŮ]"
+)
+_NON_EN_WORDS = re.compile(
+    r"(?i)(?<![a-z])(?:"
+    # Spanish / Portuguese
+    r"para|por|una|que|hola|aqu[ií]|tambi[eé]n|pero|estoy|siempre|ahora|vida|cuerpo"
+    r"|entrenamiento|entrena|ejercicios?|rutinas?|pesas|gimnasio|adelgazar|recetas?"
+    r"|nosotros|ayudo|amar|disfrutar|trabajo|poco|estilo"
+    r"|n[aã]o|voc[eê]s?|muito|tudo|seu|sua|meu|minha|treino|academia|emagrecer|sa[uú]de"
+    # German
+    r"|und|ich|nicht|f[uü]r|auf|das|ein|eine|einen|einem|mein|meine|dein|deine"
+    r"|auch|oder|aber|wir|ihr|hier|noch|schon|immer|sportlich|abnehmen|krafttraining|ern[aä]hrung|unterwegs"
+    # French
+    r"|pour|avec|dans|vous|nous|mais|tout|tr[eè]s|bien|[eê]tre|faire|chez|ici|suis"
+    r"|s[eé]ance|entra[iî]nement|musculation|ann[eé]e|nouvelle|rejoins"
+    # Italian
+    r"|che|sono|della|delle|degli|gli|anche|tutto|mio|mia|pi[uù]|oggi"
+    r"|allenamento|palestra|femminile|scopri|miei|ricette|motivazione"
+    # Dutch
+    r"|een|voor|niet|ook|maar|zijn|naar|mijn|jouw|geen|meer|weer|sporten|afvallen"
+    # Polish
+    r"|jest|nie|si[eę]|dla|jak|tylko|moje|tw[oó]j|trening|si[lł]ownia|odchudzanie"
+    # Turkish
+    r"|i[cç]in|[cç]ok|daha|spor|antrenman"
+    # Indonesian / Malay
+    r"|yang|untuk|dengan|dari|tidak|bisa|akan|juga|saya|kamu|karena|akhirnya|wajib|lengkap|sampai|habis|makin|banyak"
+    r")(?![a-z])"
+)
+_EN_WORDS = re.compile(
+    r"(?i)(?<![a-z])(?:"
+    r"the|and|for|with|this|that|your|you|my|our|from|have|just|not|but|are|was|were"
+    r"|all|out|about|how|what|when|will|can|get|here|more|like|into|they|them|their"
+    r"|been|only|also|want|make|know|need|don't|i'm|it's|you're|helping|link|below"
+    r")(?![a-z])"
 )
 
 
+def is_non_english(bio: str, captions: Sequence[str]) -> bool:
+    """Whether the creator's bio or recent captions are predominantly non-English."""
+    bio_clean = _STRIP_NOISE.sub(" ", bio or "")
+    cap_cleans = [_STRIP_NOISE.sub(" ", c or "") for c in captions]
+    combined = " ".join([bio_clean, *cap_cleans])
+
+    if len(_NON_LATIN.findall(combined)) >= 3:
+        return True
+
+    bio_non_en = len(_NON_EN_WORDS.findall(bio_clean))
+    bio_en = len(_EN_WORDS.findall(bio_clean))
+    bio_dia = len(_NON_EN_DIACRITICS.findall(bio_clean))
+    if (
+        (bio_non_en >= 2 and bio_non_en > bio_en)
+        or (bio_non_en >= 1 and bio_dia >= 1 and bio_en == 0)
+        or (bio_dia >= 3 and bio_en == 0)
+    ):
+        return True
+
+    if not cap_cleans:
+        return False
+
+    cap_non_en_count = 0
+    total_non_en = bio_non_en
+    total_en = bio_en
+    total_dia = bio_dia
+    for text in cap_cleans:
+        ne = len(_NON_EN_WORDS.findall(text))
+        en = len(_EN_WORDS.findall(text))
+        dia = len(_NON_EN_DIACRITICS.findall(text))
+        total_non_en += ne
+        total_en += en
+        total_dia += dia
+        if (ne >= 2 and ne > en) or (ne >= 1 and dia >= 1 and en == 0):
+            cap_non_en_count += 1
+
+    return (
+        (cap_non_en_count >= 2 and total_non_en >= total_en * 0.5)
+        or (total_non_en >= 4 and total_non_en > total_en)
+        or (total_dia >= 4 and total_non_en >= 2 and total_non_en >= total_en * 0.5)
+    )
+
+
 def rejected_group(niche: str, bio: str, captions: Sequence[str], email: str) -> str | None:
-    """The group reviewers reject this creator with, if any: a sport, food,
-    family, or non-gym word in the bio, a sport/food/non-gym word in two recent
-    captions, or an email on a country domain."""
+    """The group reviewers reject this creator with, if any: a blocked email
+    domain, a non-English creator, a sport/food/family/non-gym word in the bio,
+    a sport/food/non-gym word in two recent captions, or a country email domain."""
+    if email and _BLOCKED_EMAIL_DOMAINS.search(email.strip()):
+        return "blocked email domain"
+    if is_non_english(bio, captions):
+        return "non-english creator"
     groups = REJECTED_GROUPS.get(niche.strip().lower())
     if groups is None:
         return None
@@ -659,10 +655,6 @@ def hashtags_for_niche(niche: str) -> tuple[str, ...]:
 
 def search_terms_for_niche(niche: str) -> tuple[str, ...]:
     return NICHE_SEARCH_TERMS.get(niche.strip().lower(), ())
-
-
-def yahoo_queries_for_niche(niche: str) -> tuple[str, ...]:
-    return YAHOO_QUERIES.get(niche.strip().lower(), ())
 
 
 def trending_hashtags_for_niche(niche: str) -> tuple[str, ...]:

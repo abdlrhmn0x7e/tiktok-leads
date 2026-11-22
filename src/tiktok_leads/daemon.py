@@ -19,7 +19,6 @@ from tiktok_leads.niches import (
     trending_hashtags_for_niche,
     trending_found_via,
     trending_search_terms_for_niche,
-    yahoo_queries_for_niche,
 )
 from tiktok_leads.notifiers import Notifier
 from tiktok_leads.runner import (
@@ -33,17 +32,15 @@ from tiktok_leads.runner import (
 from tiktok_leads.settings import Settings
 from tiktok_leads.sources import TikTokApiSource
 from tiktok_leads.sources.tiktokapi_source import TikTokBlockedError
-from tiktok_leads.yahoo_discovery import is_done as yahoo_query_done
-from tiktok_leads.yahoo_discovery import next_page_emails
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class WorkItem:
-    kind: str  # "hashtag" | "search" | "recheck" | "yahoo" | "following"
+    kind: str  # "hashtag" | "search" | "recheck" | "following"
     niche: str
-    value: str  # hashtag, search phrase, handle (recheck, or following seed), or Yahoo query
+    value: str  # hashtag, search phrase, or handle (recheck / following seed)
     harvested: bool = False  # hashtag came from the harvesting flywheel
     trending: bool = False  # from TRENDING_HASHTAGS / TRENDING_SEARCH_TERMS
 
@@ -54,8 +51,6 @@ class WorkItem:
             return f"#{self.value}{'*' if self.harvested else ''}{trend}({self.niche})"
         if self.kind == "search":
             return f"search:{self.value!r}{trend}({self.niche})"
-        if self.kind == "yahoo":
-            return f"yahoo:{self.value!r}({self.niche})"
         if self.kind == "following":
             return f"following:@{self.value}({self.niche})"
         return f"recheck:@{self.value}({self.niche})"
@@ -106,10 +101,6 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
         if settings.effective_discovery_search:
             for term in search_terms_for_niche(niche):
                 add(WorkItem("search", niche, term))
-        # One item reads the query's unread pages; a failed fetch leaves the rest for the next sweep.
-        for query in yahoo_queries_for_niche(niche):
-            if not yahoo_query_done(repository, query, max_age_days=settings.feed_cursor_max_age_days):
-                add(WorkItem("yahoo", niche, query))
 
     logger.info(
         "daemon: skipping %s harvested hashtag(s) that are off-niche or reviewer-rejected",
@@ -166,9 +157,8 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
 
     items.extend(_trending_slots(trending, general_count=len(items), share=settings.daemon_trending_share))
     random.shuffle(items)
-    # Yahoo gave 0.59 leads/min against 0.26 for hashtag crawls (2026-11-11) and following lists
-    # gave 7 leads in 13 min (2026-11-16), so they run first (the queue pops from the end).
-    items.sort(key=lambda item: item.kind in ("yahoo", "following"))
+    # Following lists out-yield hashtags, so run them first (the queue pops from the end).
+    items.sort(key=lambda item: item.kind == "following")
     return items
 
 
@@ -336,7 +326,7 @@ async def run_daemon(
                 await close_source()
                 queue.extend(batch)
                 random.shuffle(queue)
-                queue.sort(key=lambda item: item.kind in ("yahoo", "following"))
+                queue.sort(key=lambda item: item.kind == "following")
                 sleep_for = block_backoff + random.uniform(
                     0, settings.daemon_block_backoff_jitter_seconds
                 )
@@ -468,33 +458,7 @@ async def _run_batch(
 
         if exclude_handles is None:
             exclude_handles = repository.excluded_handles(settings.recheck_after_days)
-        if item.kind == "yahoo":
-            while not yahoo_query_done(repository, item.value, max_age_days=settings.feed_cursor_max_age_days):
-                emails = await next_page_emails(
-                    repository,
-                    item.value,
-                    min_followers=settings.min_followers,
-                    exclude_handles=exclude_handles,
-                    max_age_days=settings.feed_cursor_max_age_days,
-                )
-                if emails is None:
-                    break
-                exclude_handles.update(emails)
-                inserted += await scrape_handles(
-                    source,
-                    repository,
-                    notifier,
-                    handles=list(emails),
-                    niche=item.niche,
-                    min_followers=settings.min_followers,
-                    min_average_views=settings.min_average_views,
-                    max_followers=settings.max_followers,
-                    found_via=f"yahoo:{item.value}",
-                    known_emails=emails,
-                    exclude_handles=exclude_handles,
-                )
-                await asyncio.sleep(1)
-        elif item.kind == "following":
+        if item.kind == "following":
             inserted += await scrape_following(
                 source,
                 repository,

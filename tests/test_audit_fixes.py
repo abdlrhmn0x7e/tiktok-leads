@@ -9,7 +9,6 @@ from tiktok_leads.niches import (
     is_harvestable_hashtag,
     rejected_group,
     seed_bio_on_niche,
-    yahoo_queries_for_niche,
 )
 from tiktok_leads.runner import scrape_following, scrape_hashtag
 from tiktok_leads.settings import Settings
@@ -60,20 +59,30 @@ def test_tightened_fitness_gate_blocks_false_positives_and_keeps_gym_creators():
 
 def test_rejected_group_and_harvest_rules_cover_new_exclusions():
     assert rejected_group("fitness", "Online fitness coach", [], "coach@fitness.co.nz") == "email on a country domain"
+    assert rejected_group("fitness", "Online fitness coach", [], "maja.ech@gmx.net") == "email on a country domain"
+    assert rejected_group("fitness", "Online fitness coach", [], "coach@laposte.net") == "email on a country domain"
+    assert rejected_group("fitness", "Online fitness coach", [], "coach@naver.com") == "email on a country domain"
+    assert rejected_group("fitness", "Online fitness coach", [], "julia@grail-talent.com") == "blocked email domain"
+    assert rejected_group("mom", "Mom of 2", [], "someone@grail-talent.com") == "blocked email domain"
+    assert rejected_group("fitness", "Entrena con nosotros aquí", [], "a@gmail.com") == "non-english creator"
+    assert rejected_group("fitness", "Personal trainer al femminile | Scopri i miei", [], "a@gmail.com") == "non-english creator"
+    assert rejected_group("fitness", "Krafttraining und Ernährung", [], "a@gmail.com") == "non-english creator"
+    assert rejected_group("fitness", "Онлайн тренер по фитнесу", [], "a@gmail.com") == "non-english creator"
+    # English creator with US city ("Los Angeles") or a heritage flag must still pass
+    assert rejected_group("fitness", "Strength • Los Angeles 🇩🇴", ["My go to moves for abs"], "a@gmail.com") is None
     assert rejected_group("fitness", "Crossfit athlete", [], "a@gmail.com") == "sport"
     assert not is_harvestable_hashtag("horsetrainersoftiktok", "fitness")
     assert not is_harvestable_hashtag("dogtrainer", "fitness")
     assert not is_harvestable_hashtag("gymnastics", "fitness")
     assert not is_harvestable_hashtag("proteinmaxxing", "fitness")
+    assert not is_harvestable_hashtag("pesasfitness", "fitness")
+    assert not is_harvestable_hashtag("kuwaitfitness", "fitness")
+    assert not is_harvestable_hashtag("фитнесgym", "fitness")
     assert is_harvestable_hashtag("personaltrainer", "fitness")
     assert is_harvestable_hashtag("chestday", "fitness")
     assert seed_bio_on_niche("fitness", "Online fitness coach | hypertrophy")
     assert not seed_bio_on_niche("fitness", "Relationship coaching | mindset")
     assert not seed_bio_on_niche("fitness", "Nutrition & healthy habits")
-    # Yahoo queries should no longer contain rejected food/running/mom/crossfit terms
-    queries = " ".join(yahoo_queries_for_niche("fitness")).lower()
-    for banned in ("hyrox", "crossfit", "meal prep", "marathon", "fit mom", "dietitian", "yoga instructor"):
-        assert banned not in queries
 
 
 def test_max_followers_cap_and_bio_only_veto_before_views():
