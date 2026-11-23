@@ -382,7 +382,7 @@ HARVEST_STEMS: dict[str, tuple[str, ...]] = {
         "macro", "caloriedeficit",
         # Lift, split, and explicit gym-coaching stems.
         "squat", "benchpress", "chestday", "armday", "shoulderday", "backday", "pushday",
-        "pullday", "pushpull", "physique", "bulking", "leanbulk", "kettlebell", "dumbbell",
+        "pullday", "pushpull", "physique", "hypertrophy", "bulking", "leanbulk", "kettlebell", "dumbbell",
         "barbell", "tricep", "hamstring", "smithmachine", "cablemachine", "strongwom",
         "stronggirl", "strongnotskinny", "gains", "wholift", "weightedvest", "onlinecoach",
         "personaltrain", "fitnesscoach", "gymcoach", "strengthcoach",
@@ -405,6 +405,8 @@ HARVEST_EXCLUDED: dict[str, re.Pattern[str]] = {
         r"|kuwait|dubai|habesha|espanol|latino|deutsch|francais|italiano|brasil|polska|turkiye"
         r"|motivacao|motivacion|muaythai|hijab|fitnessgram|pacer|musclecar|americanmuscle|amricanmuscle"
         r"|gymleader|pokemon|flirt|lesbian|bargain|drsquatch"
+        r"|against|uplifting|braingym|browfit|christ|spiritual|halloween|granny|nerdgym|bookworkout"
+        r"|fairykimbokjoo|bicepheart|muscletee|forkids|kids|meme|lols"
     ),
 }
 

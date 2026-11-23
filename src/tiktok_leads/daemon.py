@@ -27,6 +27,7 @@ from tiktok_leads.runner import (
     scrape_following,
     scrape_handles,
     scrape_hashtag,
+    scrape_related,
     scrape_search,
 )
 from tiktok_leads.settings import Settings
@@ -38,9 +39,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class WorkItem:
-    kind: str  # "hashtag" | "search" | "recheck" | "following"
+    kind: str  # "hashtag" | "search" | "recheck" | "following" | "related"
     niche: str
-    value: str  # hashtag, search phrase, or handle (recheck / following seed)
+    value: str  # hashtag, search phrase, or handle (recheck / following / related seed)
     harvested: bool = False  # hashtag came from the harvesting flywheel
     trending: bool = False  # from TRENDING_HASHTAGS / TRENDING_SEARCH_TERMS
 
@@ -53,6 +54,8 @@ class WorkItem:
             return f"search:{self.value!r}{trend}({self.niche})"
         if self.kind == "following":
             return f"following:@{self.value}({self.niche})"
+        if self.kind == "related":
+            return f"related:@{self.value}({self.niche})"
         return f"recheck:@{self.value}({self.niche})"
 
 
@@ -151,6 +154,13 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
             ):
                 add(WorkItem("following", niche, handle))
 
+    if settings.discovery_related_enabled:
+        for niche in niches:
+            for handle in repository.due_related_seeds(
+                niche, limit=settings.discovery_related_seeds_per_sweep
+            ):
+                add(WorkItem("related", niche, handle))
+
     if settings.recheck_enabled:
         for handle, handle_niche in repository.handles_due_for_recheck(
             niches=niches,
@@ -176,8 +186,9 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
 
     items.extend(_trending_slots(trending, general_count=len(items), share=settings.daemon_trending_share))
     random.shuffle(items)
-    # Following lists out-yield hashtags, so run them first (the queue pops from the end).
-    items.sort(key=lambda item: item.kind == "following")
+    # Following and related-video graph expansion out-yield saturated hashtags,
+    # so run them first (the queue pops from the end).
+    items.sort(key=lambda item: 2 if item.kind == "following" else (1 if item.kind == "related" else 0))
     return items
 
 
@@ -345,7 +356,7 @@ async def run_daemon(
                 await close_source()
                 queue.extend(batch)
                 random.shuffle(queue)
-                queue.sort(key=lambda item: item.kind == "following")
+                queue.sort(key=lambda item: 2 if item.kind == "following" else (1 if item.kind == "related" else 0))
                 sleep_for = block_backoff + random.uniform(
                     0, settings.daemon_block_backoff_jitter_seconds
                 )
@@ -484,6 +495,19 @@ async def _run_batch(
                 notifier,
                 seed=item.value,
                 max_pages=settings.discovery_following_pages_per_visit,
+                min_followers=settings.min_followers,
+                min_average_views=settings.min_average_views,
+                max_followers=settings.max_followers,
+                exclude_handles=exclude_handles,
+            )
+        elif item.kind == "related":
+            inserted += await scrape_related(
+                source,
+                repository,
+                notifier,
+                seed=item.value,
+                niche=item.niche,
+                max_videos=settings.discovery_related_videos_per_seed,
                 min_followers=settings.min_followers,
                 min_average_views=settings.min_average_views,
                 max_followers=settings.max_followers,

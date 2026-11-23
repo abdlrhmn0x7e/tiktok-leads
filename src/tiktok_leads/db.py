@@ -102,7 +102,8 @@ CREATE TABLE IF NOT EXISTS following_seeds (
     added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- 1: a lead from leads-hub. 2: an on-niche creator found in a seed's list.
-    level INTEGER NOT NULL DEFAULT 1
+    level INTEGER NOT NULL DEFAULT 1,
+    related_crawled_at TEXT
 );
 """
 
@@ -142,6 +143,7 @@ class LeadRepository:
         self._migrate_add_scraped_profiles_found_via()
         self._migrate_add_scraped_profiles_bio_link_enriched_at()
         self._migrate_add_following_seeds_level()
+        self._migrate_add_following_seeds_related_crawled_at()
         self._backfill_scraped_profiles_from_influencers()
         self._backfill_lead_sources()
         self.connection.commit()
@@ -150,6 +152,11 @@ class LeadRepository:
         columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(following_seeds)")}
         if "level" not in columns:
             self.connection.execute("ALTER TABLE following_seeds ADD COLUMN level INTEGER NOT NULL DEFAULT 1")
+
+    def _migrate_add_following_seeds_related_crawled_at(self) -> None:
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(following_seeds)")}
+        if "related_crawled_at" not in columns:
+            self.connection.execute("ALTER TABLE following_seeds ADD COLUMN related_crawled_at TEXT")
 
     def _migrate_add_influencers_platform(self) -> None:
         columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(influencers)")}
@@ -346,33 +353,62 @@ class LeadRepository:
         return [(str(row["handle"]), str(row["niche"])) for row in rows]
 
     def no_email_seed_handles(self, niche: str, *, limit: int = 5000) -> list[tuple[str, str | None]]:
-        """Pre-vetted on-niche >=10k creators (level-2 following seeds) that were
-        skipped as no_email and haven't been through bio-link enrichment yet.
-        Returns (handle, original_found_via) ordered oldest first."""
+        """Un-enriched no_email creators in `niche` worth checking for clickable
+        TikTok bioLinks / handle probes, ordered highest-signal first:
+          1. Level-2 following seeds (pre-vetted gym bios)
+          2. Explicit search-term discoveries (`search:...`)
+          3. Clean harvestable niche hashtags (`#tag` passing is_harvestable_hashtag)
+          4. Accounts followed directly by a level-1 leads-hub seed
+        Returns (handle, original_found_via) preserving each creator's real source."""
+        inf_handles = {
+            str(r["handle"]).removeprefix("@").lower()
+            for r in self.connection.execute(
+                "SELECT handle FROM influencers WHERE platform = 'tiktok'"
+            ).fetchall()
+        }
+        fs_level = {
+            str(r["handle"]).lower(): int(r["level"])
+            for r in self.connection.execute(
+                "SELECT handle, level FROM following_seeds WHERE niche = ?",
+                (niche,),
+            ).fetchall()
+        }
+        l1_seeds = {h for h, lvl in fs_level.items() if lvl == 1}
+
+        tiers: dict[int, list[tuple[str, str | None]]] = {1: [], 2: [], 3: [], 4: []}
         rows = self.connection.execute(
             """
-            SELECT fs.handle, sp.found_via
-            FROM following_seeds fs
-            JOIN scraped_profiles sp ON sp.handle = fs.handle
-            LEFT JOIN influencers i
-              ON lower(replace(i.handle, '@', '')) = fs.handle AND i.platform = 'tiktok'
-            WHERE fs.niche = ?
-              AND fs.level = 2
-              AND sp.skip_reason = 'no_email'
-              AND sp.bio_link_enriched_at IS NULL
-              AND coalesce(sp.found_via, '') != 'enrich:bio_link'
-              AND i.handle IS NULL
-            ORDER BY fs.added_at ASC
-            LIMIT ?
+            SELECT handle, found_via
+            FROM scraped_profiles
+            WHERE niche = ?
+              AND skip_reason = 'no_email'
+              AND bio_link_enriched_at IS NULL
+              AND coalesce(found_via, '') != 'enrich:bio_link'
+            ORDER BY last_seen_at DESC, rowid ASC
             """,
-            (niche, limit),
+            (niche,),
         ).fetchall()
-        results: list[tuple[str, str | None]] = []
         for row in rows:
-            fv = str(row["found_via"]) if row["found_via"] else None
-            if fv in ("recheck", "enrich:bio_link"):
-                fv = None
-            results.append((str(row["handle"]), fv))
+            h = str(row["handle"]).removeprefix("@").lower()
+            if not h or h in inf_handles:
+                continue
+            fv_raw = str(row["found_via"]) if row["found_via"] else ""
+            fv: str | None = None if fv_raw in ("", "recheck", "enrich:bio_link") else fv_raw
+            if h in fs_level:
+                tiers[1].append((h, fv))
+            elif fv_raw.startswith("search:"):
+                tiers[2].append((h, fv))
+            elif fv_raw.startswith("#") and is_harvestable_hashtag(fv_raw[1:], niche):
+                tiers[3].append((h, fv))
+            elif fv_raw.startswith("following:@") and fv_raw[len("following:@"):].lower() in l1_seeds:
+                tiers[4].append((h, fv))
+
+        results: list[tuple[str, str | None]] = []
+        for tier in (1, 2, 3, 4):
+            if len(results) >= limit:
+                break
+            need = limit - len(results)
+            results.extend(tiers[tier][:need])
         return results
 
     def mark_rechecked(self, handle: str) -> None:
@@ -415,11 +451,13 @@ class LeadRepository:
         )
         self.connection.commit()
 
-    def add_found_seed(self, handle: str, niche: str, sec_uid: str | None, *, commit: bool = True) -> None:
-        """An on-niche creator found in a seed's list. Crawled after every leads-hub seed."""
+    def add_found_seed(
+        self, handle: str, niche: str, sec_uid: str | None, *, level: int = 2, commit: bool = True
+    ) -> None:
+        """An on-niche creator found in a seed's list. Crawled after lower-level seeds."""
         self.connection.execute(
-            "INSERT OR IGNORE INTO following_seeds (handle, niche, sec_uid, level) VALUES (?, ?, ?, 2)",
-            (handle.removeprefix("@").lower(), niche, sec_uid),
+            "INSERT OR IGNORE INTO following_seeds (handle, niche, sec_uid, level) VALUES (?, ?, ?, ?)",
+            (handle.removeprefix("@").lower(), niche, sec_uid, level),
         )
         if commit:
             self.connection.commit()
@@ -430,6 +468,30 @@ class LeadRepository:
             (niche, limit),
         ).fetchall()
         return [str(row["handle"]) for row in rows]
+
+    def due_related_seeds(self, niche: str, *, limit: int) -> list[str]:
+        """Level-1 leads whose following list is hidden or failed and haven't
+        been expanded through /api/related/item_list/ yet (newest first)."""
+        rows = self.connection.execute(
+            """
+            SELECT handle FROM following_seeds
+            WHERE niche = ?
+              AND level = 1
+              AND state IN ('hidden', 'failed')
+              AND related_crawled_at IS NULL
+            ORDER BY added_at DESC
+            LIMIT ?
+            """,
+            (niche, limit),
+        ).fetchall()
+        return [str(row["handle"]) for row in rows]
+
+    def mark_related_crawled(self, handle: str) -> None:
+        self.connection.execute(
+            "UPDATE following_seeds SET related_crawled_at = CURRENT_TIMESTAMP WHERE handle = ?",
+            (handle.removeprefix("@").lower(),),
+        )
+        self.connection.commit()
 
     def following_seed(self, handle: str) -> FollowingSeed | None:
         row = self.connection.execute(

@@ -168,11 +168,12 @@ async def scrape_following(
         current.level,
         current.cursor,
     )
-    # Cap following-graph expansion at depth 2: only level-1 (leads-hub) seeds
-    # promote new level-2 seeds, preventing unbounded off-niche drift.
+    # Cap following-graph expansion at depth 3 (level 1 -> 2 -> 3), gated by
+    # strict gym-bio + English + follower-range checks on every promoted seed.
+    next_level = current.level + 1
     on_seed = (
-        (lambda handle, sec_uid: repository.add_found_seed(handle, current.niche, sec_uid))
-        if current.level == 1
+        (lambda handle, sec_uid: repository.add_found_seed(handle, current.niche, sec_uid, level=next_level))
+        if current.level <= 2
         else None
     )
     return await _process_candidates(
@@ -197,6 +198,41 @@ async def scrape_following(
         found_via=found_via,
         exclude_handles=exclude_handles,
     )
+
+
+async def scrape_related(
+    source: TikTokSource,
+    repository: LeadRepository,
+    notifier: Notifier,
+    *,
+    seed: str,
+    niche: str,
+    max_videos: int,
+    min_followers: int,
+    min_average_views: int,
+    max_followers: int | None = None,
+    exclude_handles: set[str] | None = None,
+) -> int:
+    found_via = f"related:@{seed}"
+    logger.info("crawling related videos for @%s (niche=%s max_videos=%s)", seed, niche, max_videos)
+    inserted = await _process_candidates(
+        source.profiles_from_related(
+            seed,
+            niche=niche,
+            max_videos=max_videos,
+            exclude_handles=exclude_handles,
+            on_seed=lambda handle, sec_uid: repository.add_found_seed(handle, niche, sec_uid, level=2),
+        ),
+        repository,
+        notifier,
+        min_followers=min_followers,
+        min_average_views=min_average_views,
+        max_followers=max_followers,
+        found_via=found_via,
+        exclude_handles=exclude_handles,
+    )
+    repository.mark_related_crawled(seed)
+    return inserted
 
 
 def is_exhausted(repository: LeadRepository, kind: str, value: str) -> bool:

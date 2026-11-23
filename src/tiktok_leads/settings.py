@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     # accounts (>= min_followers), instead of draining off-niche following lists.
     discovery_following_early_stop_pages: int = 2
     discovery_following_min_on_niche_per_stop: int = 2
+    # Related-video discovery (/api/related/item_list/) for leads whose following
+    # list is hidden/failed, unlocking graph expansion from private-following seeds.
+    discovery_related_enabled: bool = True
+    discovery_related_seeds_per_sweep: int = 30
+    discovery_related_videos_per_seed: int = 3
     # Hashtag feed cursors: resume each crawl where the last one stopped instead
     # of re-reading the (mostly already-evaluated) head of the feed. A cursor
     # older than this restarts from the top to pick up new videos; 0 disables

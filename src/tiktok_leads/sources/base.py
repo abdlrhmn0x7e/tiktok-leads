@@ -60,3 +60,14 @@ class TikTokSource(ABC):
         on_seed: Callable[[str, str | None], None] | None = None,
     ) -> AsyncIterable[CandidateProfile]:
         raise NotImplementedError
+
+    def profiles_from_related(
+        self,
+        seed: str,
+        *,
+        niche: str,
+        max_videos: int = 3,
+        exclude_handles: set[str] | None = None,
+        on_seed: Callable[[str, str | None], None] | None = None,
+    ) -> AsyncIterable[CandidateProfile]:
+        raise NotImplementedError

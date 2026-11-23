@@ -193,15 +193,61 @@ def test_level2_following_seed_does_not_promote_more_seeds_and_early_stops(monke
     assert api.calls == 2
     assert repo.following_seed("level2.seed").state == "done"
 
-    # Now test that even when a level-2 seed follows an on-niche gym creator, it does NOT add them as a new seed.
+    # Level-2 seed promotes on-niche <=max_followers gym creators to level 3,
+    # skips >max_followers mega accounts, and level-3 seeds do NOT promote level 4.
     repo.add_found_seed("level2.gym", "fitness", "MS4w-lvl2gym")
-    api2 = FakeApi(
+    source_capped = build_source(
+        Settings(
+            _env_file=None,
+            max_followers=500_000,
+            scrape_profile_delay_seconds=0,
+            scrape_profile_jitter_seconds=0,
+            resolve_bio_link_emails=False,
+        )
+    )
+    source_capped.api = FakeApi(
         [
             {
                 "statusCode": 0,
                 "userList": [
                     {
                         "user": {"uniqueId": "nested.lifter", "signature": "Powerlifter", "secUid": "s-nested", "privateAccount": False},
+                        "stats": {"followerCount": 50_000},
+                    },
+                    {
+                        "user": {"uniqueId": "mega.lifter", "signature": "Powerlifter", "secUid": "s-mega", "privateAccount": False},
+                        "stats": {"followerCount": 900_000},
+                    },
+                ],
+                "hasMore": False,
+                "minCursor": 0,
+            }
+        ]
+    )
+    asyncio.run(
+        scrape_following(
+            source_capped,
+            repo,
+            NoopNotifier(),
+            seed="level2.gym",
+            max_pages=6,
+            min_followers=10_000,
+            min_average_views=10_000,
+            max_followers=500_000,
+        )
+    )
+    nested = repo.following_seed("nested.lifter")
+    assert nested is not None and nested.level == 3
+    assert repo.following_seed("mega.lifter") is None
+
+    # Now crawl that level-3 seed: it must NOT promote level-4 seeds.
+    source_capped.api = FakeApi(
+        [
+            {
+                "statusCode": 0,
+                "userList": [
+                    {
+                        "user": {"uniqueId": "level4.lifter", "signature": "Bodybuilder", "secUid": "s-l4", "privateAccount": False},
                         "stats": {"followerCount": 50_000},
                     }
                 ],
@@ -210,19 +256,19 @@ def test_level2_following_seed_does_not_promote_more_seeds_and_early_stops(monke
             }
         ]
     )
-    source.api = api2
     asyncio.run(
         scrape_following(
-            source,
+            source_capped,
             repo,
             NoopNotifier(),
-            seed="level2.gym",
+            seed="nested.lifter",
             max_pages=6,
             min_followers=10_000,
             min_average_views=10_000,
+            max_followers=500_000,
         )
     )
-    assert repo.following_seed("nested.lifter") is None
+    assert repo.following_seed("level4.lifter") is None
 
 
 def test_hashtag_prefilter_skips_embed_for_rejected_group_and_updates_exclude_handles(monkeypatch, tmp_path):
@@ -487,5 +533,141 @@ def test_finnish_french_and_noisy_tags_blocked():
         ["Que penses-tu de mon évolution physique ? #pourtoi", "C’est dur à le trouver ce jeton #muscu"],
         "ettadlaouielies@gmail.com",
     ) == "non-english creator"
-    for bad in ("fitnessgrampacertest", "musclecarsonly", "gymleader", "motivacaofitness", "muaythaigym"):
+    for bad in (
+        "fitnessgrampacertest",
+        "musclecarsonly",
+        "gymleader",
+        "motivacaofitness",
+        "muaythaigym",
+        "noweaponformedagainstme",
+        "cardsagainsthumanity",
+        "womenupliftingwomen",
+        "braingym",
+        "browfitness",
+        "strengthinchrist",
+    ):
         assert not is_harvestable_hashtag(bad, "fitness"), bad
+
+
+def test_expanded_no_email_enrichment_tiers_and_bio_probe_without_cta(tmp_path):
+    repo = LeadRepository(tmp_path / "leads.sqlite")
+    repo.initialize()
+    repo.add_following_seeds([("l1lead", "fitness")])
+    repo.add_found_seed("tier1seed", "fitness", "s1")
+
+    for handle, fv in [
+        ("noisy_tag", "#tinnedfish"),
+        ("noisy_l2_follow", "following:@random_l2"),
+        ("tier4_l1_follow", "following:@l1lead"),
+        ("tier3_gym_tag", "#hypertrophy"),
+        ("tier2_search", "search:bodybuilding coach"),
+        ("tier1seed", "following:@l1lead"),
+    ]:
+        repo.record_scraped_profile(
+            handle=handle,
+            niche="fitness",
+            source="tiktokapi",
+            skip_reason="no_email",
+            found_via=fv,
+        )
+
+    pairs = repo.no_email_seed_handles("fitness", limit=10)
+    assert [h for h, _ in pairs] == ["tier1seed", "tier2_search", "tier3_gym_tag", "tier4_l1_follow"]
+
+    # Gym bio without any arrow/link-in-bio CTA still qualifies for embed + bioLink check
+    source = build_source(Settings(_env_file=None))
+    assert source._worth_no_email_bio_link_probe("fitness", "@DFYNE athlete | code ALEX10")
+    assert not source._worth_no_email_bio_link_probe("fitness", "Travel & foodie vlogs")
+    assert not source._worth_no_email_bio_link_probe("fitness", "Weight loss dietitian")
+
+
+def test_related_video_discovery_expands_hidden_l1_seeds_and_promotes_l2(monkeypatch, tmp_path):
+    from tiktok_leads.daemon import _build_queue
+    from tiktok_leads.runner import scrape_related
+
+    repo = LeadRepository(tmp_path / "leads.sqlite")
+    repo.initialize()
+    repo.add_following_seeds([("hidden.lead", "fitness")])
+    repo.save_following_progress("hidden.lead", sec_uid="sec-hidden", cursor=0, state="hidden")
+    assert repo.due_related_seeds("fitness", limit=10) == ["hidden.lead"]
+
+    # Queue should include related:@hidden.lead ahead of hashtags
+    settings = Settings(
+        _env_file=None,
+        discovery_following_enabled=False,
+        discovery_related_enabled=True,
+        discovery_search=False,
+        discovery_use_harvested_hashtags=False,
+        recheck_enabled=False,
+    )
+    q = _build_queue(settings, repo, ["fitness"])
+    assert q[-1].kind == "related" and q[-1].value == "hidden.lead"
+
+    def fake_embed(handle):
+        if handle == "hidden.lead":
+            return EmbedProfile(handle=handle, followers=50_000, bio="Gym coach", views=[20_000], captions=["squat"], video_ids=["vid_1"])
+        return EmbedProfile(
+            handle=handle,
+            followers=45_000,
+            bio="Online fitness coach coach@newgym.com",
+            views=[25_000, 30_000, 22_000],
+            captions=["leg day squat", "bench press", "hypertrophy training"],
+            video_ids=["v1"],
+        )
+
+    monkeypatch.setattr(tiktokapi_source, "fetch_embed", fake_embed)
+
+    class FakeApi:
+        async def make_request(self, *, url, params):
+            assert "related/item_list" in url and params["itemID"] == "vid_1"
+            return {
+                "statusCode": 0,
+                "itemList": [
+                    {
+                        "author": {
+                            "uniqueId": "fresh.lifter",
+                            "signature": "Online fitness coach coach@newgym.com",
+                            "secUid": "sec-fresh",
+                            "privateAccount": False,
+                        },
+                        "authorStats": {"followerCount": 45_000},
+                    }
+                ],
+            }
+
+    class CaptureNotifier:
+        def __init__(self):
+            self.leads = []
+
+        def send(self, lead):
+            self.leads.append(lead)
+
+        def send_found_via(self, lead):
+            pass
+
+    source = build_source(
+        Settings(_env_file=None, max_followers=500_000, scrape_profile_delay_seconds=0, scrape_profile_jitter_seconds=0, resolve_bio_link_emails=False)
+    )
+    source.api = FakeApi()
+    notifier = CaptureNotifier()
+    inserted = asyncio.run(
+        scrape_related(
+            source,
+            repo,
+            notifier,
+            seed="hidden.lead",
+            niche="fitness",
+            max_videos=2,
+            min_followers=10_000,
+            min_average_views=10_000,
+            max_followers=500_000,
+            exclude_handles=set(),
+        )
+    )
+    assert inserted == 1
+    assert notifier.leads[0].handle == "fresh.lifter"
+    assert notifier.leads[0].found_via == "related:@hidden.lead"
+    # Fresh gym creator also promoted as level-2 following seed, and hidden.lead won't re-run
+    promoted = repo.following_seed("fresh.lifter")
+    assert promoted is not None and promoted.level == 2
+    assert repo.due_related_seeds("fitness", limit=10) == []

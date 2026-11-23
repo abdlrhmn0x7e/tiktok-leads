@@ -20,7 +20,6 @@ from TikTokApi.exceptions import (
 
 from tiktok_leads.bio_links import (
     bio_hints_link_page,
-    bio_suggests_external_link,
     emails_from_bio_links,
     probe_handle_bio_links,
 )
@@ -476,6 +475,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     if (
                         on_seed is not None
                         and (followers or 0) >= self.min_followers
+                        and (self.max_followers is None or (followers or 0) <= self.max_followers)
                         and not self._get(user, "privateAccount", default=False)
                         and seed_bio_on_niche(niche, bio_text)
                         and rejected_group(niche, bio_text, [], "") is None
@@ -558,6 +558,96 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                 on_progress(sec_uid, cursor, "due" if has_more else "done")
                 if not has_more:
                     return
+        except TikTokBlockedError:
+            raise
+        except Exception as error:
+            blocked = await self._handle_feed_error(error, context=context)
+            if blocked:
+                raise TikTokBlockedError(f"feed requests blocked on {context}") from error
+        finally:
+            if self.restart_session_between_hashtags and not blocked:
+                await self._restart_session()
+
+    async def profiles_from_related(
+        self,
+        seed: str,
+        *,
+        niche: str,
+        max_videos: int = 3,
+        exclude_handles: set[str] | None = None,
+        on_seed: Callable[[str, str | None], None] | None = None,
+    ) -> AsyncIterable[CandidateProfile]:
+        """Creators surfaced by TikTok's related-video feed for up to
+        `max_videos` recent videos of `seed`. Works even when `seed` hides
+        their following list."""
+        api = self._api()
+        context = f"@{seed}'s related videos"
+        excluded = self._normalize_excluded(exclude_handles)
+        seen_handles: set[str] = {seed.removeprefix("@").lower()}
+        consecutive_blocked = 0
+        blocked = False
+        try:
+            self.embed_request_count += 1
+            embed = await asyncio.to_thread(fetch_embed, seed)
+            video_ids = list(embed.video_ids[: max(1, max_videos)]) if embed else []
+            if not video_ids:
+                logger.info("no recent videos for related expansion of @%s", seed)
+                return
+            for idx, video_id in enumerate(video_ids):
+                if idx:
+                    await self._delay()
+                self.request_count += 1
+                resp = await api.make_request(
+                    url="https://www.tiktok.com/api/related/item_list/",
+                    params={"itemID": video_id, "count": 16},
+                )
+                if resp is None:
+                    raise InvalidResponseException(resp, "TikTok returned an invalid response.")
+                status = self._parse_int(resp.get("statusCode"))
+                if status not in (None, 0):
+                    logger.warning("%s (video %s) answered statusCode %s", context, video_id, status)
+                    continue
+                self._feed_block_streak = 0
+                items = resp.get("itemList") or []
+                for item in items:
+                    author = self._get(item, "author", default={})
+                    stats = self._get(item, "authorStats", "author_stats", default={})
+                    handle = str(self._get(author, "uniqueId", "unique_id", default="")).strip()
+                    normalized_handle = handle.removeprefix("@").lower()
+                    if not handle or normalized_handle in seen_handles:
+                        continue
+                    followers = self._parse_int(self._get(stats, "followerCount", "follower_count", default=None))
+                    bio = self._get(author, "signature", default=None) if isinstance(author, dict) else None
+                    bio_text = str(bio or "")
+                    if (
+                        on_seed is not None
+                        and (followers or 0) >= self.min_followers
+                        and (self.max_followers is None or (followers or 0) <= self.max_followers)
+                        and not self._get(author, "privateAccount", default=False)
+                        and seed_bio_on_niche(niche, bio_text)
+                        and rejected_group(niche, bio_text, [], "") is None
+                    ):
+                        on_seed(normalized_handle, self._get(author, "secUid", default=None) or None)
+                    if normalized_handle in excluded:
+                        logger.info("skipping @%s from %s: handle already evaluated", handle, context)
+                        continue
+                    seen_handles.add(normalized_handle)
+
+                    prefiltered = self._candidate_from_feed_item(item, niche=niche, handle=handle)
+                    if prefiltered is not None:
+                        yield prefiltered
+                        continue
+
+                    result = await self._fetch_candidate(item, niche=niche, handle=handle, context=f"from {context}")
+                    if result.profile is not None:
+                        consecutive_blocked = 0
+                        yield result.profile
+                    elif result.blocked:
+                        consecutive_blocked += 1
+                        if await self._recover_if_blocked(consecutive_blocked, context=context):
+                            blocked = True
+                            raise TikTokBlockedError(f"sustained TikTok blocking on {context}")
+                    await self._embed_delay()
         except TikTokBlockedError:
             raise
         except Exception as error:
@@ -828,7 +918,6 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         return (
             self.resolve_bio_link_emails
             and (self.probe_no_email_bio_links or self.fetch_bio_link_via_detail)
-            and bio_suggests_external_link(bio)
             and seed_bio_on_niche(niche, bio)
             and rejected_group(niche, bio, [], "") is None
         )
