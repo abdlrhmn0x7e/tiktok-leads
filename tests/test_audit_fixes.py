@@ -441,3 +441,51 @@ def test_enrich_preserves_original_found_via_and_tracks_enrichment(tmp_path):
     assert rows["gymcoach.sam"][1] is not None
     # Neither is returned again by no_email_seed_handles
     assert repo.no_email_seed_handles("fitness", limit=10) == []
+
+
+def test_build_queue_filters_exhausted_harvested_hashtags_before_cap(tmp_path):
+    from tiktok_leads.daemon import _build_queue
+
+    repo = LeadRepository(tmp_path / "leads.sqlite")
+    repo.initialize()
+    # Two high-mention tags that are currently exhausted, plus one fresh tag behind them
+    for _ in range(10):
+        repo.record_discovered_hashtags(["upperbodygym", "lowerbodygym"], niche="fitness")
+    for _ in range(3):
+        repo.record_discovered_hashtags(["tonedglutes"], niche="fitness")
+    repo.set_feed_cursor("hashtag-exhausted:upperbodygym", 1)
+    repo.set_feed_cursor("hashtag-exhausted:lowerbodygym", 1)
+
+    settings = Settings(
+        _env_file=None,
+        discovery_use_harvested_hashtags=True,
+        discovery_harvested_min_mentions=2,
+        discovery_harvested_hashtags_per_niche=2,
+        discovery_following_enabled=False,
+        discovery_search=False,
+        recheck_enabled=False,
+    )
+    queue = _build_queue(settings, repo, ["fitness"])
+    harvested = [item.value for item in queue if item.harvested]
+    assert "tonedglutes" in harvested
+    assert "upperbodygym" not in harvested
+    assert "lowerbodygym" not in harvested
+
+
+def test_finnish_french_and_noisy_tags_blocked():
+    from tiktok_leads.niches import is_harvestable_hashtag
+
+    assert rejected_group(
+        "fitness",
+        '@DFYNE Athlete | Koodi "VEETI" -10%\nHAE VALMENNUKSEEN👇🏻',
+        ["Sä voisit olla ens vuonna TÄYSIN eri versio itestäs #kuntosali", "Tää vois olla sä, jos LOCK INNAISIT"],
+        "veetimanagement@gmail.com",
+    ) == "non-english creator"
+    assert rejected_group(
+        "fitness",
+        "Street workout & muscu basic fit 💪🏽 Discipline au quotidien, suis l'évolution",
+        ["Que penses-tu de mon évolution physique ? #pourtoi", "C’est dur à le trouver ce jeton #muscu"],
+        "ettadlaouielies@gmail.com",
+    ) == "non-english creator"
+    for bad in ("fitnessgrampacertest", "musclecarsonly", "gymleader", "motivacaofitness", "muaythaigym"):
+        assert not is_harvestable_hashtag(bad, "fitness"), bad

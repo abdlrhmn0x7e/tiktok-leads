@@ -400,10 +400,11 @@ HARVEST_EXCLUDED: dict[str, re.Pattern[str]] = {
         r"|mom(?!ent)|(?<!maxi)mum|baby|pregnan|postpartum|dad(?!dy)|papa"
         r"|horse|equestrian|dog|canine|puppy|lash|salon|pilatesprincess"
         r"|pesas|entren|rutina|ejercici|gimnasio|adelgazar|musculacion|musculation|seance"
-        r"|entrainement|abnehmen|krafttraining|ernahrung|frauen|muskel|allenamento|palestra|treino"
-        r"|academia|emagrecer|antrenman|trening|kosthold|styrka|kuwait|dubai|habesha|espanol|latino|deutsch"
-        r"|francais|italiano|brasil|polska|turkiye"
-        r"|bargain|drsquatch"
+        r"|entrainement|abnehmen|krafttraining|ernahrung|frauen|muskel|bizeps|allenamento|palestra|treino"
+        r"|academia|emagrecer|antrenman|trening|kosthold|styrka|suomi|kuntosali|treeni"
+        r"|kuwait|dubai|habesha|espanol|latino|deutsch|francais|italiano|brasil|polska|turkiye"
+        r"|motivacao|motivacion|muaythai|hijab|fitnessgram|pacer|musclecar|americanmuscle|amricanmuscle"
+        r"|gymleader|pokemon|flirt|lesbian|bargain|drsquatch"
     ),
 }
 
@@ -555,7 +556,8 @@ _NON_EN_WORDS = re.compile(
     r"|auch|oder|aber|wir|ihr|hier|noch|schon|immer|sportlich|abnehmen|krafttraining|ern[aä]hrung|unterwegs"
     # French
     r"|pour|avec|dans|vous|nous|mais|tout|tr[eè]s|bien|[eê]tre|faire|chez|ici|suis"
-    r"|s[eé]ance|entra[iî]nement|musculation|ann[eé]e|nouvelle|rejoins"
+    r"|s[eé]ance|entra[iî]nement|musculation|muscu|ann[eé]e|nouvelle|rejoins"
+    r"|mon|les|des|une|quotidien|trouver|penses|jeune|c['’]est"
     # Italian
     r"|che|sono|della|delle|degli|gli|anche|tutto|mio|mia|pi[uù]|oggi"
     r"|allenamento|palestra|femminile|scopri|miei|ricette|motivazione"
@@ -564,6 +566,9 @@ _NON_EN_WORDS = re.compile(
     # Nordic (Norwegian / Swedish / Danish)
     r"|jeg|deg|ikke|og|til|trening\w*|kosthold|sterkere|hjelper|velg|uker|[øo]kter"
     r"|jag|och|att|inte|tr[äa]ning\w*|styrka|hvordan|eller|svarer|m[åa]ned|kroppen"
+    # Finnish
+    r"|koodi|suomi|kiitos|kanssa|treeni\w*|kuntosali|valmennus\w*|kaikille|t[äa]ss[äa]"
+    r"|jotta|mutta|vois|olla|miten|k[äa]ytt[äa]j[äa]|seuraa|mun|t[äa][äa]"
     # Polish
     r"|jest|nie|si[eę]|dla|jak|tylko|moje|tw[oó]j|trening|si[lł]ownia|odchudzanie"
     # Turkish

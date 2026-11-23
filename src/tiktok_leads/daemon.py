@@ -83,20 +83,39 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
         for tag in hashtags_for_niche(niche):
             add(WorkItem("hashtag", niche, tag))
         if settings.discovery_use_harvested_hashtags:
-            due = [
-                tag
-                for tag in repository.due_hashtags(
-                    niche=niche,
-                    min_times_seen=settings.discovery_harvested_min_mentions,
-                    not_scraped_within_days=settings.discovery_harvested_recrawl_after_days,
-                )
-                if f"#{tag.lower()}" not in trending_sources
-            ]
-            harvestable = [tag for tag in due if is_harvestable_hashtag(tag, niche)]
-            skipped_hashtags += len(due) - len(harvestable)
-            # Seed tags are already queued; capping before dropping them left 4 of 15 slots for new tags.
-            harvestable = [tag for tag in harvestable if ("hashtag", niche, tag.lower()) not in seen]
-            for tag in harvestable[: settings.discovery_harvested_hashtags_per_niche]:
+            # Prefer fresh tags outside the normal recrawl window; if all of
+            # them are resting in exhausted, fall back to the shorter hashtag
+            # exhaustion window so the daemon never starves with "no work".
+            recrawl_windows = [settings.discovery_harvested_recrawl_after_days]
+            if EXHAUSTED_DAYS["hashtag"] < settings.discovery_harvested_recrawl_after_days:
+                recrawl_windows.append(EXHAUSTED_DAYS["hashtag"])
+            picked: list[str] = []
+            for window_days in recrawl_windows:
+                due = [
+                    tag
+                    for tag in repository.due_hashtags(
+                        niche=niche,
+                        min_times_seen=settings.discovery_harvested_min_mentions,
+                        not_scraped_within_days=window_days,
+                    )
+                    if f"#{tag.lower()}" not in trending_sources
+                ]
+                harvestable = [tag for tag in due if is_harvestable_hashtag(tag, niche)]
+                if window_days == recrawl_windows[0]:
+                    skipped_hashtags += len(due) - len(harvestable)
+                # Filter out already-queued AND exhausted tags BEFORE slicing the
+                # per-sweep cap, otherwise top-mentioned exhausted tags crowd out
+                # thousands of fresh tags behind them.
+                candidates = [
+                    tag
+                    for tag in harvestable
+                    if ("hashtag", niche, tag.lower()) not in seen
+                    and not is_exhausted(repository, "hashtag", tag)
+                ]
+                if candidates:
+                    picked = candidates[: settings.discovery_harvested_hashtags_per_niche]
+                    break
+            for tag in picked:
                 add(WorkItem("hashtag", niche, tag, harvested=True))
         if settings.effective_discovery_search:
             for term in search_terms_for_niche(niche):
