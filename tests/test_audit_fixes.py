@@ -572,7 +572,7 @@ def test_expanded_no_email_enrichment_tiers_and_bio_probe_without_cta(tmp_path):
         )
 
     pairs = repo.no_email_seed_handles("fitness", limit=10)
-    assert [h for h, _ in pairs] == ["tier1seed", "tier2_search", "tier3_gym_tag", "tier4_l1_follow"]
+    assert [h for h, _ in pairs] == ["tier1seed", "tier4_l1_follow", "tier2_search", "tier3_gym_tag"]
 
     # Gym bio without any arrow/link-in-bio CTA still qualifies for embed + bioLink check
     source = build_source(Settings(_env_file=None))

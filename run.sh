@@ -18,6 +18,11 @@ set -u
 
 cd "$(dirname "$0")"
 
+# Guard against inherited TMPDIR paths from ephemeral shells being deleted later.
+if [ -z "${TMPDIR:-}" ] || [ ! -d "${TMPDIR}" ]; then
+  export TMPDIR=/tmp
+fi
+
 NICHES="${1:-fitness}"
 [ $# -gt 0 ] && shift
 RESTART_DELAY="${RESTART_DELAY:-60}"

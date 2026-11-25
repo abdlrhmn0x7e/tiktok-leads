@@ -355,10 +355,10 @@ class LeadRepository:
     def no_email_seed_handles(self, niche: str, *, limit: int = 5000) -> list[tuple[str, str | None]]:
         """Un-enriched no_email creators in `niche` worth checking for clickable
         TikTok bioLinks / handle probes, ordered highest-signal first:
-          1. Level-2 following seeds (pre-vetted gym bios)
-          2. Explicit search-term discoveries (`search:...`)
-          3. Clean harvestable niche hashtags (`#tag` passing is_harvestable_hashtag)
-          4. Accounts followed directly by a level-1 leads-hub seed
+          1. Following seeds (pre-vetted gym bios)
+          2. Accounts followed directly by a level-1 leads-hub seed
+          3. Explicit search-term discoveries (`search:...`)
+          4. Clean harvestable niche hashtags (`#tag` passing is_harvestable_hashtag)
         Returns (handle, original_found_via) preserving each creator's real source."""
         inf_handles = {
             str(r["handle"]).removeprefix("@").lower()
@@ -396,11 +396,11 @@ class LeadRepository:
             fv: str | None = None if fv_raw in ("", "recheck", "enrich:bio_link") else fv_raw
             if h in fs_level:
                 tiers[1].append((h, fv))
-            elif fv_raw.startswith("search:"):
-                tiers[2].append((h, fv))
-            elif fv_raw.startswith("#") and is_harvestable_hashtag(fv_raw[1:], niche):
-                tiers[3].append((h, fv))
             elif fv_raw.startswith("following:@") and fv_raw[len("following:@"):].lower() in l1_seeds:
+                tiers[2].append((h, fv))
+            elif fv_raw.startswith("search:"):
+                tiers[3].append((h, fv))
+            elif fv_raw.startswith("#") and is_harvestable_hashtag(fv_raw[1:], niche):
                 tiers[4].append((h, fv))
 
         results: list[tuple[str, str | None]] = []

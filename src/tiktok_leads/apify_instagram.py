@@ -29,6 +29,7 @@ from tiktok_leads.bio_links import emails_from_bio_links
 from tiktok_leads.db import LeadRepository
 from tiktok_leads.email_extractor import extract_emails
 from tiktok_leads.models import Lead
+from tiktok_leads.niches import is_on_niche, rejected_group
 from tiktok_leads.notifiers import build_notifier
 from tiktok_leads.numbers import floor_view_count, robust_average_view_count
 from tiktok_leads.settings import Settings
@@ -124,13 +125,24 @@ def profile_emails(profile: dict, *, resolve_links: bool) -> list[str]:
     return emails
 
 
-def reel_views(reels: list[dict]) -> dict[str, list[int]]:
+def reel_views_and_captions(reels: list[dict]) -> tuple[dict[str, list[int]], dict[str, list[str]]]:
     views: dict[str, list[int]] = {}
+    captions: dict[str, list[str]] = {}
     for reel in reels:
+        owner = str(reel.get("ownerUsername") or "").lower()
+        if not owner:
+            continue
         count = reel.get("videoPlayCount") or reel.get("videoViewCount")
         if count:
-            views.setdefault(str(reel.get("ownerUsername") or "").lower(), []).append(int(count))
-    return views
+            views.setdefault(owner, []).append(int(count))
+        cap = str(reel.get("caption") or "").strip()
+        if cap:
+            captions.setdefault(owner, []).append(cap)
+    return views, captions
+
+
+def reel_views(reels: list[dict]) -> dict[str, list[int]]:
+    return reel_views_and_captions(reels)[0]
 
 
 class Budget:
@@ -275,6 +287,10 @@ def verify_instagram(
         if repository.exists_by_email(emails[0]):
             record(hit, "known_email")
             continue
+        bio = str(profile.get("biography") or "")
+        if not hit.email and rejected_group(hit.niche, bio, [], emails[0]) is not None:
+            record(hit, "off_niche")
+            continue
         emailed.append((hit, profile, emails[0]))
     print(f"{len(emailed)} creators in the follower band with a new email")
     if not emailed:
@@ -291,7 +307,7 @@ def verify_instagram(
         },
         max_items=len(emailed) * args.reels_per_creator,
     )
-    views = reel_views(reels)
+    views, captions_by_handle = reel_views_and_captions(reels)
     capped = budget.remaining <= 0.01
 
     notifier = build_notifier(settings)
@@ -302,6 +318,13 @@ def verify_instagram(
         average = robust_average_view_count(views.get(hit.handle, []))
         if not hit.email and (average is None or average < settings.min_average_views):
             record(hit, "low_views")
+            continue
+        bio = str(profile.get("biography") or "")
+        caps = captions_by_handle.get(hit.handle, [])
+        if not hit.email and (
+            not is_on_niche(hit.niche, bio, caps) or rejected_group(hit.niche, bio, caps, email) is not None
+        ):
+            record(hit, "off_niche")
             continue
         record(hit, None)
         lead = Lead(
