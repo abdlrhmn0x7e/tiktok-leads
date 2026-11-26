@@ -1,23 +1,22 @@
 from __future__ import annotations
 
+import math
+
 
 def robust_average_view_count(values: list[int]) -> int | None:
+    """25th percentile (P25) with linear interpolation, matching the
+    Viral Automations Ext (MVC) Chrome extension."""
     if not values:
         return None
 
     sorted_values = sorted(values)
-    count = len(sorted_values)
-    if count < 5:
-        return median(sorted_values)
-
-    # TikTok allows up to 3 pinned videos; once we have enough samples, trim at
-    # least 3 from each tail so 3 pinned viral outliers can't inflate a low-view
-    # account above the threshold.
-    trim_count = max(3, round(count * 0.2)) if count >= 9 else max(1, round(count * 0.15))
-    trimmed = sorted_values[trim_count:-trim_count]
-    if not trimmed:
-        trimmed = sorted_values
-    return round(sum(trimmed) / len(trimmed))
+    idx = 0.25 * (len(sorted_values) - 1)
+    lower = math.floor(idx)
+    upper = math.ceil(idx)
+    if lower == upper:
+        return sorted_values[lower]
+    raw = sorted_values[lower] + (sorted_values[upper] - sorted_values[lower]) * (idx - lower)
+    return int(math.floor(raw + 0.5))
 
 
 def median(sorted_values: list[int]) -> int:
@@ -29,12 +28,5 @@ def median(sorted_values: list[int]) -> int:
 
 
 def floor_view_count(value: int) -> int:
-    if value < 10_000:
-        step = 1_000
-    elif value < 100_000:
-        step = 5_000
-    elif value < 1_000_000:
-        step = 10_000
-    else:
-        step = 100_000
-    return (value // step) * step
+    """Round to the nearest 1,000 (half up), matching MVC's Math.round(n / 1000) * 1000."""
+    return int(math.floor(value / 1000 + 0.5)) * 1000

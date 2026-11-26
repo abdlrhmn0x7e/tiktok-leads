@@ -27,7 +27,7 @@ from tiktok_leads.db import FollowingState
 from tiktok_leads.email_extractor import extract_emails
 from tiktok_leads.models import CandidateProfile
 from tiktok_leads.niches import bio_on_niche, is_on_niche, rejected_group, seed_bio_on_niche
-from tiktok_leads.numbers import robust_average_view_count
+from tiktok_leads.numbers import floor_view_count, robust_average_view_count
 from tiktok_leads.sources.base import TikTokSource
 from tiktok_leads.sources.embed import fetch_embed, fetch_sec_uid
 
@@ -1017,9 +1017,10 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         if not self.resolve_bio_link_emails:
             return [], []
         avg_views = robust_average_view_count(views)
+        rounded_views = floor_view_count(avg_views) if avg_views is not None else None
         if (
-            avg_views is None
-            or avg_views < self.min_average_views
+            rounded_views is None
+            or rounded_views < self.min_average_views
             or not is_on_niche(niche, bio, captions)
             or rejected_group(niche, bio, captions, "") is not None
         ):

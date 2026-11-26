@@ -362,16 +362,35 @@ def test_hashtag_prefilter_skips_embed_for_rejected_group_and_updates_exclude_ha
 
 def test_pinned_viral_outliers_do_not_inflate_average_views_and_troll_pages_rejected():
     from tiktok_leads.niches import is_on_niche
-    from tiktok_leads.numbers import robust_average_view_count
+    from tiktok_leads.numbers import floor_view_count, robust_average_view_count
+    from tiktok_leads.sources.embed import _unpinned_videos
 
     # 3 pinned viral videos + 10 low-view videos (exact @skulltok1 distribution)
     views = [4_400_000, 7_200_000, 8_000_000, 19_100, 4_231, 3_224, 4_072, 435, 1_482, 1_052, 879, 10_300, 1_447]
     avg = robust_average_view_count(views)
-    assert avg is not None and avg < 10_000
+    assert avg == 1_447  # P25 (idx=3.0 on 13 sorted items)
+    assert floor_view_count(avg) == 1_000
 
-    # Normal consistent creator with 3 viral pins still passes cleanly
-    consistent = [1_500_000, 900_000, 800_000, 25_000, 22_000, 18_000, 15_000, 14_000, 12_000, 11_000, 9_500, 8_000]
-    assert robust_average_view_count(consistent) >= 14_000
+    # Exact MVC P25 interpolation on 15 videos (idx=3.5 -> midpoint of sorted[3] and sorted[4])
+    fifteen = [3_000, 4_000, 5_000, 6_000, 8_000, 12_000, 15_000, 18_000, 20_000, 25_000, 30_000, 40_000, 50_000, 80_000, 200_000]
+    assert robust_average_view_count(fifteen) == 7_000
+    assert floor_view_count(9_500) == 10_000
+    assert floor_view_count(9_499) == 9_000
+
+    # Consistent creator with P25 >= 10K passes cleanly
+    consistent = [25_000, 22_000, 18_000, 15_000, 14_000, 12_000, 11_000, 10_500, 9_500, 8_000]
+    assert floor_view_count(robust_average_view_count(consistent)) == 11_000
+
+    # Embed videoList strips leading pinned older snowflake IDs
+    embed_vids = [
+        {"id": "7657947056052391199", "playCount": 392_200},
+        {"id": "7562967558198971678", "playCount": 1_200_000},
+        {"id": "7683222379052420383", "playCount": 234_200},
+        *[{"id": str(7712000000000000000 - i * 1000), "playCount": 10_000 + i * 1000} for i in range(10)],
+    ]
+    unpinned = _unpinned_videos(embed_vids)
+    assert len(unpinned) == 10
+    assert unpinned[0]["id"] == "7712000000000000000"
 
     # Troll / clip-repost signals rejected even if captions spam #calisthenics / #gymer
     assert rejected_group(

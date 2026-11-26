@@ -70,8 +70,9 @@ def evaluate_candidate(
         )
 
     average_views = candidate.average_views
-    if average_views is None or average_views < min_average_views:
-        views = "unknown" if average_views is None else f"{average_views:,}"
+    rounded_average_views = floor_view_count(average_views) if average_views is not None else None
+    if rounded_average_views is None or rounded_average_views < min_average_views:
+        views = "unknown" if rounded_average_views is None else f"{rounded_average_views:,}"
         return LeadEvaluation(
             lead=None,
             skip_reason=f"average views below threshold ({views} < {min_average_views:,})",
@@ -92,8 +93,6 @@ def evaluate_candidate(
             skip_reason=f"reviewers reject this group ({group})",
             skip_code="off_niche",
         )
-
-    rounded_average_views = floor_view_count(average_views)
 
     return LeadEvaluation(
         lead=Lead(

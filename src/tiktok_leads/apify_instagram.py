@@ -316,7 +316,8 @@ def verify_instagram(
         if capped and hit.handle not in views:
             continue  # the budget cut the reel run off before this creator; retried next run
         average = robust_average_view_count(views.get(hit.handle, []))
-        if not hit.email and (average is None or average < settings.min_average_views):
+        rounded = floor_view_count(average) if average is not None else None
+        if not hit.email and (rounded is None or rounded < settings.min_average_views):
             record(hit, "low_views")
             continue
         bio = str(profile.get("biography") or "")

@@ -156,8 +156,8 @@ def parse_args(settings: Settings) -> argparse.Namespace:
     parser.add_argument(
         "--reels-per-creator",
         type=int,
-        default=6,
-        help="Instagram only: recent reels fetched to average a creator's views (default: 6)",
+        default=15,
+        help="Instagram only: recent reels fetched to compute P25 views (default: 15, matching MVC)",
     )
     parser.add_argument(
         "--sort",

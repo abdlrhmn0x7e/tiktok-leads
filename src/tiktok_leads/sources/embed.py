@@ -41,6 +41,31 @@ class EmbedProfile:
     video_ids: list[str]
 
 
+def _unpinned_videos(videos: list[dict]) -> list[dict]:
+    """Drop up to 3 leading pinned videos from TikTok's embed videoList.
+    Embed puts pinned videos first, followed by up to 10 newest unpinned videos
+    in strictly descending snowflake ID order."""
+    if len(videos) <= 1:
+        return videos
+    # Embed returns 10 unpinned videos plus any pinned slots (up to 3).
+    start = min(3, len(videos) - 10) if len(videos) > 10 else 0
+    ids: list[int | None] = []
+    for video in videos:
+        try:
+            ids.append(int(video["id"]))
+        except (KeyError, TypeError, ValueError):
+            ids.append(None)
+    # Catch pinned videos even when total count <= 10 (an older snowflake ID placed before newer ones).
+    while start < min(3, len(videos) - 1):
+        cur_id = ids[start]
+        later_ids = [vid for vid in ids[start + 1 :] if vid is not None]
+        if cur_id is not None and later_ids and cur_id < max(later_ids):
+            start += 1
+        else:
+            break
+    return videos[start:] or videos
+
+
 def parse_embed(page: str) -> EmbedProfile | None:
     """None when TikTok says the creator does not exist. Raises ValueError
     when the page is not a creator page at all (a block, or a changed page)."""
@@ -54,12 +79,13 @@ def parse_embed(page: str) -> EmbedProfile | None:
             return None
         user = creator["userInfo"]
         videos = creator.get("videoList") or []
+        unpinned = _unpinned_videos(videos)
         return EmbedProfile(
             handle=str(user["uniqueId"]),
             followers=int(user["followerCount"]),
             bio=str(user.get("signature") or ""),
-            views=[int(video["playCount"]) for video in videos if video.get("playCount") is not None],
-            captions=[str(video.get("desc") or "") for video in videos],
+            views=[int(video["playCount"]) for video in unpinned if video.get("playCount") is not None],
+            captions=[str(video.get("desc") or "") for video in unpinned],
             video_ids=[str(video["id"]) for video in videos if video.get("id")],
         )
     except (KeyError, StopIteration, TypeError) as error:
