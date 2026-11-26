@@ -36,6 +36,17 @@ logger = logging.getLogger(__name__)
 
 _CAPTION_HASHTAG = re.compile(r"#(\w+)")
 
+# TikTok's web video player streams multi-MB MP4 chunks via MSE `fetch()` rather
+# than `resource_type == "media"` (~40 MB per cold boot!). Aborting these CDN
+# video streams and the homepage For-You feed slashes proxy bandwidth by >90%
+# without affecting the signing scripts or our own API calls.
+_BLOCKED_URL_RE = re.compile(
+    r"(?:/video/tos/|/aweme/v\d+/play/|/api/(?:explore|recommend)/item_list/"
+    r"|https?://v\d+[^/]*\.tiktok(?:cdn)?[^/]*\.com/"
+    r"|\.(?:mp4|m3u8|webm)(?:\?|$))",
+    re.IGNORECASE,
+)
+
 # A hashtag crawl gives up after this many raw feed items per requested new
 # candidate, so a feed whose every author is already evaluated still ends.
 MAX_FEED_ITEMS_PER_NEW_CANDIDATE = 5
@@ -213,15 +224,14 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     page.set_default_navigation_timeout(self.session_timeout_ms)
                     page.set_default_timeout(self.session_timeout_ms)
                     await stealth_async(page)
-                    if suppress_types:
-                        await page.route(
-                            "**/*",
-                            lambda route, request: (
-                                route.abort()
-                                if request.resource_type in suppress_types
-                                else route.continue_()
-                            ),
-                        )
+
+                    async def _filter_route(route: Any, request: Any) -> None:
+                        if request.resource_type in suppress_types or _BLOCKED_URL_RE.search(request.url):
+                            await route.abort()
+                        else:
+                            await route.continue_()
+
+                    await page.route("**/*", _filter_route)
                     await page.goto(
                         self.starting_url,
                         wait_until="domcontentloaded",
