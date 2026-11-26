@@ -4,6 +4,7 @@ import asyncio
 import logging
 import random
 import time
+import zlib
 from dataclasses import dataclass
 from datetime import date
 
@@ -59,33 +60,68 @@ class WorkItem:
         return f"recheck:@{self.value}({self.niche})"
 
 
-def _build_queue(settings: Settings, repository: LeadRepository, niches: list[str]) -> list[WorkItem]:
-    """Build a shuffled work queue for one sweep: seed hashtags + harvested
-    hashtags + user-searches + stale re-checks, with trending-topic items
-    making up settings.daemon_trending_share of it."""
+def _in_shard(kind: str, value: str, shard: tuple[int, int] | None) -> bool:
+    if shard is None:
+        return True
+    shard_idx, shard_total = shard
+    return (zlib.crc32(f"{kind}:{value.lower()}".encode()) % shard_total) == shard_idx
+
+
+def _build_queue(
+    settings: Settings,
+    repository: LeadRepository,
+    niches: list[str],
+    *,
+    only: str = "all",
+    shard: tuple[int, int] | None = None,
+    force_convex_search_terms: bool = False,
+) -> list[WorkItem]:
+    """Build a shuffled work queue for one sweep.
+
+    `only` restricts the queue so dedicated processes can run in parallel:
+      - "all": hashtags + searches + following + related + rechecks
+      - "following": only following-list expansion
+      - "hashtags": only hashtags (seed + harvested + trending) + rechecks
+      - "discovery": everything except following (hashtags + searches + related + rechecks)
+    `shard` (index, total) deterministically partitions work across parallel workers.
+    """
     items: list[WorkItem] = []
     trending: list[WorkItem] = []
     seen: set[tuple[str, str, str]] = set()
     trending_sources = trending_found_via()
     skipped_hashtags = 0
 
+    include_hashtags = only in ("all", "hashtags", "discovery")
+    include_search = only in ("all", "discovery")
+    include_following = only in ("all", "following")
+    include_related = only in ("all", "discovery")
+    include_recheck = only in ("all", "hashtags", "discovery")
+
     def add(item: WorkItem) -> None:
+        if not _in_shard(item.kind, item.value, shard):
+            return
         key = (item.kind, item.niche, item.value.lower())
         if key not in seen:
             seen.add(key)
             items.append(item)
 
     for niche in niches:
-        for tag in trending_hashtags_for_niche(niche):
-            seen.add(("hashtag", niche, tag.lower()))
-            trending.append(WorkItem("hashtag", niche, tag, trending=True))
-        if settings.effective_discovery_search:
+        if include_hashtags:
+            for tag in trending_hashtags_for_niche(niche):
+                if not _in_shard("hashtag", tag, shard):
+                    continue
+                seen.add(("hashtag", niche, tag.lower()))
+                trending.append(WorkItem("hashtag", niche, tag, trending=True))
+        if include_search and settings.effective_discovery_search:
             for term in trending_search_terms_for_niche(niche):
+                if not _in_shard("search", term, shard):
+                    continue
                 seen.add(("search", niche, term.lower()))
                 trending.append(WorkItem("search", niche, term, trending=True))
-        for tag in hashtags_for_niche(niche):
-            add(WorkItem("hashtag", niche, tag))
-        if settings.discovery_use_harvested_hashtags:
+        if include_hashtags:
+            for tag in hashtags_for_niche(niche):
+                add(WorkItem("hashtag", niche, tag))
+        if include_hashtags and settings.discovery_use_harvested_hashtags:
             # Prefer fresh tags outside the normal recrawl window; if all of
             # them are resting in exhausted, fall back to the shorter hashtag
             # exhaustion window so the daemon never starves with "no work".
@@ -106,13 +142,13 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
                 harvestable = [tag for tag in due if is_harvestable_hashtag(tag, niche)]
                 if window_days == recrawl_windows[0]:
                     skipped_hashtags += len(due) - len(harvestable)
-                # Filter out already-queued AND exhausted tags BEFORE slicing the
-                # per-sweep cap, otherwise top-mentioned exhausted tags crowd out
-                # thousands of fresh tags behind them.
+                # Filter out already-queued, other shards, AND exhausted tags
+                # BEFORE slicing the per-sweep cap.
                 candidates = [
                     tag
                     for tag in harvestable
-                    if ("hashtag", niche, tag.lower()) not in seen
+                    if _in_shard("hashtag", tag, shard)
+                    and ("hashtag", niche, tag.lower()) not in seen
                     and not is_exhausted(repository, "hashtag", tag)
                 ]
                 if candidates:
@@ -120,20 +156,21 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
                     break
             for tag in picked:
                 add(WorkItem("hashtag", niche, tag, harvested=True))
-        if settings.effective_discovery_search:
+        if include_search and settings.effective_discovery_search:
             for term in search_terms_for_niche(niche):
                 add(WorkItem("search", niche, term))
 
-    logger.info(
-        "daemon: skipping %s harvested hashtag(s) that are off-niche or reviewer-rejected",
-        skipped_hashtags,
-    )
+    if include_hashtags:
+        logger.info(
+            "daemon: skipping %s harvested hashtag(s) that are off-niche or reviewer-rejected",
+            skipped_hashtags,
+        )
 
-    # Run regardless of discovery_search: these are terms someone asked for.
-    for term, niche in fetch_search_terms(settings):
-        add(WorkItem("search", niche, term))
+    if force_convex_search_terms or (include_search and settings.effective_discovery_search):
+        for term, niche in fetch_search_terms(settings):
+            add(WorkItem("search", niche, term))
 
-    if settings.discovery_following_enabled:
+    if include_following and settings.discovery_following_enabled:
         daemon_niches = {niche.lower(): niche for niche in niches}
         # A sweep can be one item long and repeat every few seconds, and a full seed read
         # costs Convex ~4 MB: ask at most every 10 min, and only for leads changed since.
@@ -154,14 +191,14 @@ def _build_queue(settings: Settings, repository: LeadRepository, niches: list[st
             ):
                 add(WorkItem("following", niche, handle))
 
-    if settings.discovery_related_enabled:
+    if include_related and settings.discovery_related_enabled:
         for niche in niches:
             for handle in repository.due_related_seeds(
                 niche, limit=settings.discovery_related_seeds_per_sweep
             ):
                 add(WorkItem("related", niche, handle))
 
-    if settings.recheck_enabled:
+    if include_recheck and settings.recheck_enabled:
         for handle, handle_niche in repository.handles_due_for_recheck(
             niches=niches,
             after_days=settings.recheck_after_days,
@@ -270,6 +307,9 @@ async def run_daemon(
     *,
     niches: list[str],
     limit: int,
+    only: str = "all",
+    shard: tuple[int, int] | None = None,
+    force_convex_search_terms: bool = False,
 ) -> None:
     """Run forever: scrape a small slice of work each cycle, then rest.
 
@@ -278,12 +318,16 @@ async def run_daemon(
     raises TikTokBlockedError; we back off for hours and resume — never crash,
     never lose progress (dedup + harvested tags + skip reasons live in SQLite).
     """
+    shard_label = f" shard={shard[0]}/{shard[1]}" if shard else ""
     logger.info(
-        "daemon starting: niches=%s per_cycle=%s cycle_sleep=%.0fmin",
+        "daemon starting: niches=%s only=%s%s per_cycle=%s cycle_sleep=%.0fs",
         ", ".join(niches),
+        only,
+        shard_label,
         settings.effective_burst_size,
-        settings.effective_rest_seconds / 60,
+        settings.effective_rest_seconds,
     )
+    is_primary_worker = shard is None or shard[0] == 0
 
     queue: list[WorkItem] = []
     exclude_handles: set[str] | None = None
@@ -306,10 +350,19 @@ async def run_daemon(
     try:
         while True:
             if not queue:
-                queue = _build_queue(settings, repository, niches)
+                queue = _build_queue(
+                    settings,
+                    repository,
+                    niches,
+                    only=only,
+                    shard=shard,
+                    force_convex_search_terms=force_convex_search_terms,
+                )
                 if not queue:
                     logger.error(
-                        "no work for niches=%s; sleeping before retry", ", ".join(niches)
+                        "no work for niches=%s only=%s; sleeping before retry",
+                        ", ".join(niches),
+                        only,
                     )
                     await asyncio.sleep(settings.effective_rest_seconds)
                     continue
@@ -322,9 +375,10 @@ async def run_daemon(
                     len(exclude_handles),
                 )
 
-            _retry_unnotified(repository, notifier)
-            if settings.notification_daily_digest:
-                _maybe_send_digest(repository, notifier)
+            if is_primary_worker:
+                _retry_unnotified(repository, notifier)
+                if settings.notification_daily_digest:
+                    _maybe_send_digest(repository, notifier)
 
             batch = [queue.pop() for _ in range(min(settings.effective_burst_size, len(queue)))]
             logger.info("daemon: starting cycle: %s", ", ".join(i.label for i in batch))

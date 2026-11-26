@@ -63,12 +63,18 @@ def parse_proxy(server: str, index: int, settings: Settings) -> Proxy:
 
 
 def build_proxy_provider(settings: Settings) -> ProxyProvider | None:
-    if settings.webshare_api_key:
-        return Webshare(api_key=settings.webshare_api_key)
     servers = settings.effective_proxy_servers
-    if not servers:
-        return None
-    return StaticProxyProvider([parse_proxy(server, i, settings) for i, server in enumerate(servers)])
+    if servers:
+        return StaticProxyProvider([parse_proxy(server, i, settings) for i, server in enumerate(servers)])
+    if settings.webshare_api_key:
+        provider = Webshare(api_key=settings.webshare_api_key)
+        us_proxies = [
+            p for p in provider.list_proxies() if str(getattr(p, "country_code", "") or "").upper() == "US"
+        ]
+        if us_proxies:
+            return StaticProxyProvider(us_proxies)
+        return provider
+    return None
 
 
 def resolve_num_sessions(settings: Settings, proxy_provider: ProxyProvider | None) -> int:

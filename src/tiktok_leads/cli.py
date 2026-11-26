@@ -54,6 +54,16 @@ async def async_main() -> None:
         help="Daemon mode that runs only the search terms (and their niches) from leads-hub; "
         "no hashtags, built-in searches, or re-checks. --niche is ignored",
     )
+    parser.add_argument(
+        "--only",
+        choices=["all", "following", "hashtags", "discovery"],
+        default="all",
+        help="Daemon mode: restrict work kinds so following and hashtag crawlers can run as separate processes",
+    )
+    parser.add_argument(
+        "--shard",
+        help="Daemon mode: deterministic shard K/N (e.g. 0/3) so parallel workers never overlap",
+    )
     parser.add_argument("--test-notification", action="store_true", help="Send a fake lead notification and exit")
     parser.add_argument("--test-proxy", action="store_true", help="Test configured proxy connectivity and exit")
     parser.add_argument("--log-level", default="INFO", help="Logging level: DEBUG, INFO, WARNING, ERROR")
@@ -118,6 +128,16 @@ async def async_main() -> None:
         return
 
     if args.daemon or args.search_terms_only:
+        shard: tuple[int, int] | None = None
+        if args.shard:
+            try:
+                raw_idx, raw_total = args.shard.split("/", 1)
+                idx, total = int(raw_idx), int(raw_total)
+                if not (0 <= idx < total):
+                    raise ValueError
+                shard = (idx, total)
+            except ValueError:
+                parser.error("--shard must be K/N with 0 <= K < N (e.g. 0/3)")
         if args.search_terms_only:
             # No niches and no re-checks leaves _build_queue with only the leads-hub terms.
             niches = []
@@ -126,7 +146,16 @@ async def async_main() -> None:
             niches = [n.strip() for n in args.niche.split(",") if n.strip()]
         notifier = build_notifier(settings)
         try:
-            await run_daemon(settings, repository, notifier, niches=niches, limit=args.limit)
+            await run_daemon(
+                settings,
+                repository,
+                notifier,
+                niches=niches,
+                limit=args.limit,
+                only=args.only,
+                shard=shard,
+                force_convex_search_terms=args.search_terms_only,
+            )
         finally:
             repository.close()
         return

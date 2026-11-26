@@ -690,3 +690,99 @@ def test_related_video_discovery_expands_hidden_l1_seeds_and_promotes_l2(monkeyp
     promoted = repo.following_seed("fresh.lifter")
     assert promoted is not None and promoted.level == 2
     assert repo.due_related_seeds("fitness", limit=10) == []
+
+
+def test_daemon_only_and_shard_partitioning_and_search_gate(tmp_path, monkeypatch):
+    from tiktok_leads.daemon import _build_queue
+    from tiktok_leads.settings import Settings
+
+    repo = LeadRepository(tmp_path / "leads.sqlite")
+    repo.initialize()
+    repo.add_following_seeds([("seed_a", "fitness"), ("seed_b", "fitness")])
+    for tag in ("hypertrophy", "pushday", "legday", "glutes", "deadlift", "benchpress"):
+        for _ in range(5):
+            repo.record_discovered_hashtags([tag], niche="fitness")
+
+    monkeypatch.setattr(
+        "tiktok_leads.daemon.fetch_search_terms",
+        lambda _s: [("gut tok", "fitness"), ("calorie deficit hack", "fitness")],
+    )
+    monkeypatch.setattr("tiktok_leads.daemon.fetch_following_seeds", lambda *_a, **_k: None)
+
+    s = Settings(
+        _env_file=None,
+        discovery_use_search=False,
+        discovery_search=False,
+        discovery_related_enabled=False,
+        discovery_harvested_min_mentions=3,
+        recheck_enabled=False,
+    )
+
+    q_fol = _build_queue(s, repo, ["fitness"], only="following")
+    assert q_fol and all(i.kind == "following" for i in q_fol)
+
+    q0 = _build_queue(s, repo, ["fitness"], only="hashtags", shard=(0, 3))
+    q1 = _build_queue(s, repo, ["fitness"], only="hashtags", shard=(1, 3))
+    q2 = _build_queue(s, repo, ["fitness"], only="hashtags", shard=(2, 3))
+    assert all(i.kind == "hashtag" for i in (*q0, *q1, *q2))
+    v0, v1, v2 = {i.value for i in q0}, {i.value for i in q1}, {i.value for i in q2}
+    assert v0.isdisjoint(v1) and v0.isdisjoint(v2) and v1.isdisjoint(v2)
+    assert len(v0 | v1 | v2) > 0
+
+
+def test_hashtag_empty_bio_allows_bio_link_probe_but_following_requires_gym_bio():
+    from tiktok_leads.sources.tiktokapi_source import TikTokApiSource
+
+    src = TikTokApiSource(
+        ms_tokens=None,
+        num_sessions=1,
+        recent_video_count=15,
+        min_followers=10_000,
+        max_followers=500_000,
+        min_average_views=10_000,
+        skip_videos_without_email=True,
+        skip_videos_below_min_followers=True,
+        headless=True,
+        browser="chromium",
+        starting_url="https://www.tiktok.com",
+        session_timeout_ms=30_000,
+        session_retries=0,
+        suppress_resource_load_types=None,
+        request_delay_seconds=0,
+        request_jitter_seconds=0,
+        max_consecutive_blocked_profiles=3,
+        block_cooldown_seconds=0,
+        restart_session_on_block=False,
+        restart_session_between_hashtags=False,
+        proxy_provider=None,
+    )
+    assert (
+        src._prefiltered_candidate(
+            niche="fitness",
+            handle="shortbio",
+            followers=50_000,
+            bio="23 | LA | DM for collabs",
+            allow_empty_bio_probe=True,
+        )
+        is None
+    )
+    assert (
+        src._prefiltered_candidate(
+            niche="fitness",
+            handle="shortbio",
+            followers=50_000,
+            bio="23 | LA | DM for collabs",
+            allow_empty_bio_probe=False,
+        )
+        is not None
+    )
+    assert (
+        src._prefiltered_candidate(
+            niche="fitness",
+            handle="nordicfit",
+            followers=50_000,
+            bio="Trening og kosthold",
+            allow_empty_bio_probe=True,
+        )
+        is not None
+    )

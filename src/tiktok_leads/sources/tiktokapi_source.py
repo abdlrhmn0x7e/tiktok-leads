@@ -283,13 +283,21 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                 seen_handles.add(normalized_handle)
                 inspected.value += 1
 
-                prefiltered = self._candidate_from_feed_item(item, niche=niche, handle=handle)
+                prefiltered = self._candidate_from_feed_item(
+                    item, niche=niche, handle=handle, allow_empty_bio_probe=True
+                )
                 if prefiltered is not None:
                     # Disqualified using data already in the feed — zero requests spent.
                     yield prefiltered
                     continue
 
-                result = await self._fetch_candidate(item, niche=niche, handle=handle, context=f"from #{tag}")
+                result = await self._fetch_candidate(
+                    item,
+                    niche=niche,
+                    handle=handle,
+                    context=f"from #{tag}",
+                    allow_empty_bio_probe=True,
+                )
                 if result.profile is not None:
                     consecutive_blocked = 0
                     yield result.profile
@@ -782,6 +790,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         *,
         niche: str,
         handle: str,
+        allow_empty_bio_probe: bool = False,
     ) -> CandidateProfile | None:
         author = self._get(item, "author", default={})
         if not isinstance(author, dict):
@@ -795,6 +804,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             bio=self._get(author, "signature", default=None),
             discovered_hashtags=sorted(self._extract_hashtags(item)),
             external_links=self._extract_bio_links(author),
+            allow_empty_bio_probe=allow_empty_bio_probe,
         )
 
     def _prefiltered_candidate(
@@ -807,6 +817,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         discovered_hashtags: list[str] | None = None,
         external_links: list[str] | None = None,
         check_rejected_group: bool = True,
+        allow_empty_bio_probe: bool = False,
     ) -> CandidateProfile | None:
         """Disqualify a creator using only feed/search/following payload data
         (zero requests). Returns a candidate the filters will reject, or None
@@ -833,12 +844,14 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         bio_emails = extract_emails(bio_text, *links)
         if self.skip_videos_without_email and bio is not None and not bio_emails:
             # A bio that references a link page (Linktree etc.), has a
-            # structured TikTok bioLink, or is a high-signal gym bio with a
-            # link-in-bio CTA may hide its email one hop away.
+            # structured TikTok bioLink, or is worth probing behind the scenes
+            # may hide its email one hop away.
             if self.resolve_bio_link_emails and (
                 links
                 or bio_hints_link_page(bio_text)
-                or self._worth_no_email_bio_link_probe(niche, bio_text)
+                or self._worth_no_email_bio_link_probe(
+                    niche, bio_text, allow_empty_bio=allow_empty_bio_probe
+                )
             ):
                 return None
             return candidate
@@ -859,6 +872,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         niche: str,
         handle: str,
         context: str,
+        allow_empty_bio_probe: bool = False,
     ) -> _Fetch:
         """Fetch what the feed couldn't provide: the recent videos when it
         gave followers and bio, the whole profile otherwise. One embed-page
@@ -878,6 +892,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     feed_hashtags=self._extract_hashtags(item),
                     external_links=external_links,
                     sec_uid=self._get(author, "secUid", default=None) or None,
+                    allow_empty_bio_probe=allow_empty_bio_probe,
                 ),
                 handle=handle,
                 context=context,
@@ -914,11 +929,13 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             logger.exception("failed to fetch profile @%s%s", handle, suffix)
             return _Fetch(None, blocked=True)
 
-    def _worth_no_email_bio_link_probe(self, niche: str, bio: str) -> bool:
+    def _worth_no_email_bio_link_probe(
+        self, niche: str, bio: str, *, allow_empty_bio: bool = False
+    ) -> bool:
         return (
             self.resolve_bio_link_emails
             and (self.probe_no_email_bio_links or self.fetch_bio_link_via_detail)
-            and seed_bio_on_niche(niche, bio)
+            and (allow_empty_bio or seed_bio_on_niche(niche, bio))
             and rejected_group(niche, bio, [], "") is None
         )
 
@@ -932,6 +949,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         feed_hashtags: set[str],
         external_links: list[str] | None = None,
         sec_uid: str | None = None,
+        allow_empty_bio_probe: bool = False,
     ) -> CandidateProfile:
         links = list(external_links or [])
         extra_emails: list[str] = []
@@ -942,7 +960,9 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             if links or bio_hints_link_page(bio):
                 extra_emails = await self._resolve_bio_link_emails(handle, bio, links)
             if not extra_emails:
-                if self._worth_no_email_bio_link_probe(niche, bio):
+                if self._worth_no_email_bio_link_probe(
+                    niche, bio, allow_empty_bio=allow_empty_bio_probe
+                ):
                     # Pre-qualify on free embed views + captions BEFORE probing
                     # Linktree/Stan or calling /api/user/detail/.
                     defer_link_probe = True
