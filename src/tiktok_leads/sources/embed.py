@@ -92,19 +92,38 @@ def parse_embed(page: str) -> EmbedProfile | None:
         raise ValueError(f"unexpected embed page state: {error!r}") from error
 
 
-def fetch_embed(handle: str, *, timeout_seconds: float = 20.0, attempts: int = 4) -> EmbedProfile | None:
+def fetch_embed(
+    handle: str,
+    *,
+    timeout_seconds: float = 20.0,
+    attempts: int = 4,
+    proxy_urls: list[str] | None = None,
+) -> EmbedProfile | None:
     status = 0
+    last_error: Exception | None = None
     for attempt in range(attempts):
-        response = _SESSION.get(
-            f"https://www.tiktok.com/embed/@{handle}",
-            timeout=timeout_seconds,
-        )
+        proxies = None
+        if proxy_urls:
+            proxy_url = proxy_urls[attempt % len(proxy_urls)]
+            proxies = {"http": proxy_url, "https": proxy_url}
+        try:
+            response = _SESSION.get(
+                f"https://www.tiktok.com/embed/@{handle}",
+                timeout=timeout_seconds,
+                proxies=proxies,
+            )
+        except requests.RequestException as error:
+            last_error = error
+            time.sleep(1.5 * (attempt + 1))
+            continue
         status = response.status_code
         # A missing creator answers 400 with a well-formed error state.
         if status in (200, 400):
             return parse_embed(response.text)
-        # 503 "overload-protect triggered" clears on a retry.
-        time.sleep(2 * (attempt + 1))
+        # 503 "overload-protect triggered" clears on a retry (rotating proxy if configured).
+        time.sleep(1.5 * (attempt + 1))
+    if last_error is not None and status == 0:
+        raise RuntimeError(f"embed page for @{handle} failed {attempts} times: {last_error}") from last_error
     raise RuntimeError(f"embed page for @{handle} answered HTTP {status} {attempts} times")
 
 
@@ -117,16 +136,26 @@ def parse_sec_uid(page: str) -> str:
     return match.group(1)
 
 
-def fetch_sec_uid(handle: str, *, timeout_seconds: float = 20.0) -> str | None:
+def fetch_sec_uid(
+    handle: str,
+    *,
+    timeout_seconds: float = 20.0,
+    proxy_urls: list[str] | None = None,
+) -> str | None:
     """The secUid that TikTok's following-list API needs. The embed page has
     none, but the page of any of the creator's videos does. None when the
     creator is gone or has no videos."""
-    embed = fetch_embed(handle, timeout_seconds=timeout_seconds)
+    embed = fetch_embed(handle, timeout_seconds=timeout_seconds, proxy_urls=proxy_urls)
     if embed is None or not embed.video_ids:
         return None
+    proxies = None
+    if proxy_urls:
+        proxy_url = proxy_urls[0]
+        proxies = {"http": proxy_url, "https": proxy_url}
     response = _SESSION.get(
         f"https://www.tiktok.com/@{embed.handle}/video/{embed.video_ids[0]}",
         timeout=timeout_seconds,
+        proxies=proxies,
     )
     response.raise_for_status()
     return parse_sec_uid(response.text)

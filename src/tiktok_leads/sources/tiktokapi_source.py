@@ -146,6 +146,45 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         # tracked separately so they don't inflate Playwright cycle rest.
         self.request_count = 0
         self.embed_request_count = 0
+        self._embed_proxies = self._extract_proxy_urls(proxy_provider)
+        self._embed_proxy_index = 0
+
+    @staticmethod
+    def _extract_proxy_urls(proxy_provider: Any | None) -> list[str]:
+        if proxy_provider is None:
+            return []
+        try:
+            proxies = proxy_provider.list_proxies()
+        except Exception:
+            return []
+        urls: list[str] = []
+        for proxy in proxies:
+            endpoint = f"{proxy.proxy_address}:{proxy.port}"
+            auth = f"{proxy.username}:{proxy.password}@" if proxy.username and proxy.password else ""
+            proto = proxy.protocols[0] if getattr(proxy, "protocols", None) else "http"
+            req_proto = "socks5h" if proto == "socks5" else proto
+            urls.append(f"{req_proto}://{auth}{endpoint}")
+        return urls
+
+    def _next_embed_proxies(self) -> list[str] | None:
+        if not self._embed_proxies:
+            return None
+        n = len(self._embed_proxies)
+        start = self._embed_proxy_index % n
+        self._embed_proxy_index += 1
+        return self._embed_proxies[start:] + self._embed_proxies[:start]
+
+    async def _fetch_embed(self, handle: str) -> Any:
+        proxy_urls = self._next_embed_proxies()
+        if proxy_urls:
+            return await asyncio.to_thread(fetch_embed, handle, proxy_urls=proxy_urls)
+        return await asyncio.to_thread(fetch_embed, handle)
+
+    async def _fetch_sec_uid(self, handle: str) -> str | None:
+        proxy_urls = self._next_embed_proxies()
+        if proxy_urls:
+            return await asyncio.to_thread(fetch_sec_uid, handle, proxy_urls=proxy_urls)
+        return await asyncio.to_thread(fetch_sec_uid, handle)
 
     async def __aenter__(self) -> "TikTokApiSource":
         await self._start_session()
@@ -460,7 +499,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         try:
             if sec_uid is None:
                 self.embed_request_count += 2  # embed page + video page
-                sec_uid = await asyncio.to_thread(fetch_sec_uid, seed)
+                sec_uid = await self._fetch_sec_uid(seed)
                 if sec_uid is None:
                     logger.info("no following list for @%s: creator gone or has no videos", seed)
                     on_progress(None, cursor, "failed")
@@ -621,7 +660,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         blocked = False
         try:
             self.embed_request_count += 1
-            embed = await asyncio.to_thread(fetch_embed, seed)
+            embed = await self._fetch_embed(seed)
             video_ids = list(embed.video_ids[: max(1, max_videos)]) if embed else []
             if not video_ids:
                 logger.info("no recent videos for related expansion of @%s", seed)
@@ -1113,7 +1152,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         signed user-detail call it replaces failed for every profile on
         2026-11-09."""
         self.embed_request_count += 1
-        embed = await asyncio.to_thread(fetch_embed, handle)
+        embed = await self._fetch_embed(handle)
         if embed is None:
             # Deleted or renamed. Returned without followers so the runner
             # records the handle; left unrecorded, a recheck retries it every sweep.
@@ -1174,7 +1213,7 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
         user-videos call it replaces was refused for every creator from
         2026-11-12 01:20."""
         self.embed_request_count += 1
-        embed = await asyncio.to_thread(fetch_embed, handle)
+        embed = await self._fetch_embed(handle)
         if embed is None:
             return [], [], set()
         hashtags = {tag.lower() for caption in embed.captions for tag in _CAPTION_HASHTAG.findall(caption)}
