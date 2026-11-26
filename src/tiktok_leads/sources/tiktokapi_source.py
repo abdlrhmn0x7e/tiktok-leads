@@ -17,6 +17,7 @@ from TikTokApi.exceptions import (
     InvalidResponseException,
     NotFoundException,
 )
+from TikTokApi.stealth import stealth_async
 
 from tiktok_leads.bio_links import (
     bio_hints_link_page,
@@ -166,6 +167,29 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
             if self.proxy_provider is not None:
                 logger.info("using proxy provider %s", type(self.proxy_provider).__name__)
             try:
+                suppress_types = set(self.suppress_resource_load_types or ())
+
+                async def _page_factory(context: Any) -> Any:
+                    page = await context.new_page()
+                    page.set_default_navigation_timeout(self.session_timeout_ms)
+                    page.set_default_timeout(self.session_timeout_ms)
+                    await stealth_async(page)
+                    if suppress_types:
+                        await page.route(
+                            "**/*",
+                            lambda route, request: (
+                                route.abort()
+                                if request.resource_type in suppress_types
+                                else route.continue_()
+                            ),
+                        )
+                    await page.goto(
+                        self.starting_url,
+                        wait_until="domcontentloaded",
+                        timeout=self.session_timeout_ms,
+                    )
+                    return page
+
                 await self.api.create_sessions(
                     ms_tokens=self.ms_tokens or None,
                     num_sessions=self.num_sessions,
@@ -175,7 +199,8 @@ class TikTokApiSource(TikTokSource, AbstractAsyncContextManager["TikTokApiSource
                     headless=self.headless,
                     starting_url=self.starting_url,
                     timeout=self.session_timeout_ms,
-                    suppress_resource_load_types=self.suppress_resource_load_types,
+                    suppress_resource_load_types=None,
+                    page_factory=_page_factory,
                     allow_partial_sessions=self.num_sessions > 1,
                     min_sessions=1,
                 )
